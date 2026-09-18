@@ -18,6 +18,10 @@ settings.json
 errorCode
 PPYTHON_PATH
 panda3d/
+Panda3D/
+
+# Local launcher settings
+launch/windows/launcher_config.json
 
 toontown/archipelago/output/
 

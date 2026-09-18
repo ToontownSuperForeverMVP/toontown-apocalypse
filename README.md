@@ -56,16 +56,22 @@ To get started, please see the build instructions [here.](https://github.com/too
 
 ## Starting the game
 
-Once Panda3D is installed, please find your systems launch directory.
-- Windows: `win32`
-- Mac: `darwin`
-- Linux: `linux`
+On Windows, place the Panda3D runtime in `Panda3D/` at the repository root. The
+runtime is intentionally ignored by Git because it is a local engine
+distribution rather than project source.
 
-Then run the following scripts in order:
-- `start_astron_server`
-- `start_uberdog_server`
-- `start_ai_server`
-- `start_game`
+Run `launch/windows/start-all.bat`. It starts Astron, UberDOG, the AI server,
+and the client through the bundled Panda3D Python interpreter. The first run
+can save local settings to `launch/windows/launcher_config.json`.
+
+The launcher expects the Panda3D interpreter at:
+
+```text
+Panda3D/python/ppython.exe
+```
+
+The individual legacy server scripts remain available under `win32/` if you
+need to start each service separately.
 
 ## Common Issues/FAQ
 
@@ -84,8 +90,9 @@ You should be able to figure it out with a bit of research on Google.
 
 ### I launched the game and I am getting the error: The system cannot find the path specified
 
-You did not do the `PPYTHON_PATH` step correctly from before. Double check that Panda3D is installed at the directory
-located in `PPYTHON_PATH` and try again.
+Make sure the Panda3D runtime exists at `Panda3D/python/ppython.exe`. The
+unified Windows launcher resolves that path relative to the repository, so no
+machine-specific `PPYTHON_PATH` file is required.
 
 
 ### I logged in and I have no gags and can't access the Toon HQ.... why can't I play?
