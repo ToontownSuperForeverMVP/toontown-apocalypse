@@ -1,0 +1,32 @@
+*.pyc
+*.pyo
+*.fzn
+*.dll
+pandac/
+*.dis
+*.log
+screenshots/
+sign/
+whitelist/
+news/
+Library/
+*.buildings
+*.trackRecords
+*.DS_Store
+backups/
+settings.json
+errorCode
+PPYTHON_PATH
+panda3d/
+
+toontown/archipelago/output/
+
+# PyCharm IDE
+.idea
+.run/
+venv/
+
+# Build
+output/
+release/
+apworld/toontown.apworld
