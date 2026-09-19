@@ -113,6 +113,15 @@ class StreetDirectorAI(DirectObject):
         self.d_setObjectives()
 
     def stop(self):
+        # A street planner can be torn down before its next validation tick
+        # notices that the Toon has already crossed into the destination
+        # street.  Export the live run before dropping the director so the
+        # destination planner can still restore the selected tier and the
+        # rolling Cog Pressure meter.
+        if self.runActive:
+            now = globalClock.getFrameTime()
+            for avId in list(self.activeToons):
+                self._queueRunHandoff(avId, now)
         self.started = False
         if self.taskName is not None:
             taskMgr.remove(self.taskName)

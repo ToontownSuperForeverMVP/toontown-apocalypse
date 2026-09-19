@@ -3,7 +3,7 @@ from panda3d.core import *
 from toontown.toonbase.ToonBaseGlobal import *
 from direct.directnotify import DirectNotifyGlobal
 from direct.fsm import StateData
-from otp.otpbase.PythonUtil import PriorityCallbacks, uniqueName
+from otp.otpbase.PythonUtil import PriorityCallbacks
 from toontown.safezone import PublicWalk
 from toontown.launcher import DownloadForceAcknowledge
 from . import TrialerForceAcknowledge
@@ -652,34 +652,16 @@ class Place(StateData.StateData, FriendsListManager.FriendsListManager):
          'shardId': None,
          'tunnelName': tunnelName}
         self.accept('tunnelOutMovieDone', self.__tunnelOutMovieDone)
-        # A malformed/late tunnel movie callback can leave the place FSM in
-        # tunnelOut forever.  Give the normal callback three seconds to win;
-        # otherwise mirror the user's ~stuck recovery and return control to
-        # the movement state.
-        self._tunnelOutRecoveryTaskName = uniqueName('tunnelOutRecovery')
-        taskMgr.remove(self._tunnelOutRecoveryTaskName)
-        taskMgr.doMethodLater(3.0, self._recoverTunnelOut, self._tunnelOutRecoveryTaskName)
         base.localAvatar.tunnelOut(tunnelOrigin)
         base.localAvatar.stopQuestMap()
         return
-
-    def _recoverTunnelOut(self, task):
-        if not hasattr(self, 'fsm'):
-            return Task.done
-        current = self.fsm.getCurrentState()
-        if current is not None and current.getName() != 'walk' and self.fsm.hasStateNamed('walk'):
-            self.setState('walk')
-        return Task.done
 
     def __tunnelOutMovieDone(self):
         self.ignore('tunnelOutMovieDone')
         messenger.send(self.doneEvent)
 
     def exitTunnelOut(self):
-        recoveryTaskName = getattr(self, '_tunnelOutRecoveryTaskName', None)
-        if recoveryTaskName:
-            taskMgr.remove(recoveryTaskName)
-            self._tunnelOutRecoveryTaskName = None
+        pass
 
     def enterTeleportOut(self, requestStatus, callback):
         base.localAvatar.setTeleporting(True)

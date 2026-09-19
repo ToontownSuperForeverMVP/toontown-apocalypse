@@ -231,11 +231,10 @@ class DistributedSuitInterior(DistributedObject.DistributedObject):
 
     def setState(self, state, timestamp):
         self.fsm.request(state, [globalClockDelta.localElapsedTime(timestamp)])
-        if self.actionBuilding and state in ('Elevator', 'Battle', 'Resting', 'Reward'):
+        if self.actionBuilding and state in ('Battle', 'Resting', 'Reward'):
             # The classic interior state machine used to hand control to
-            # TownBattle here.  Action floors stay in the room—and in their
-            # elevators—so movement, aiming, interaction, and the elevator
-            # trigger remain live throughout the physical transition.
+            # TownBattle here.  Action floors stay in the room so movement,
+            # aiming, and the elevator trigger remain live.
             place = base.cr.playGame.getPlace()
             if place is not None and place.fsm.getCurrentState().getName() != 'walk':
                 place.setState('walk')

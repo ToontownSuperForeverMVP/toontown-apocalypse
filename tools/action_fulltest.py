@@ -1672,6 +1672,29 @@ def testDirectorValidationAndDebug():
     check(not director.controllers, 'stop clears controllers')
 
 
+def testDirectorPlannerShutdownHandoff():
+    """A planner teardown must not erase a run before the next street owns it."""
+    director, planner, air, toon = _makeDirector()
+    air.actionRunHandoffs = {}
+    director.requestStreetRun(toon.doId, 7)
+    director.pressure.setValue(432)
+    planner.actionDirector = director
+    air.suitPlanners = {planner.zoneId: planner}
+
+    director.stop()
+    state = air.actionRunHandoffs.get(toon.doId)
+    check(state is not None, 'planner shutdown stores the active run handoff')
+    eq(state.get('tier'), 7, 'planner shutdown preserves the selected tier')
+    eq(state.get('pressure'), 432, 'planner shutdown preserves rolling pressure')
+
+    destination = FakePlanner(air, zoneId=1200)
+    resumed = StreetDirectorAI(destination)
+    destination.actionDirector = resumed
+    resumed.requestStreetRun(toon.doId, 1)
+    eq(resumed.getTier(), 7, 'the destination street restores the selected tier')
+    eq(resumed.pressure.getValue(), 432, 'the destination street restores rolling pressure')
+
+
 def testDirectorTierChangeRules():
     director, planner, air, toon = _makeDirector()
     director.requestStreetRun(toon.doId, 3)
@@ -3469,6 +3492,7 @@ TESTS = (
     testDirectorDeathAndAnnouncements,
     testDirectorStageChanges,
     testDirectorValidationAndDebug,
+    testDirectorPlannerShutdownHandoff,
     testDirectorTierChangeRules,
     testDirectorTicks,
     testSuitHitValidation,

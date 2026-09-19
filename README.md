@@ -65,34 +65,17 @@ Windows is the only supported platform. For other platforms you will need to bui
 
 ### Step 1: Install prerequisites
 
+* **Git** — [git-scm.com](https://git-scm.com/downloads)
 * **A GPU and drivers capable of running Panda3D** (any reasonably modern machine is fine)
 
-You do **not** need a system Python: the game runs on a bundled interpreter shipped with the Panda3D runtime. Git is only required if you choose the Git/GitHub Desktop setup below.
+You do **not** need a system Python: the game runs on a bundled interpreter shipped with the Panda3D runtime.
 
-### Step 2: Choose an install method
-
-#### ZIP/local install
-
-Download the repository as a ZIP from the GitHub **Code** button and extract it. This is the easiest option if you do not want to install Git. The extracted folder is your local game installation.
-
-When you want to update a ZIP/local installation, double-click **`start.bat` in the project root**. It checks GitHub for the latest commit on `main`, downloads the updated source ZIP when needed, applies it while keeping local runtime/configuration files, and then starts the game. The updater needs an internet connection.
-
-#### Git or GitHub Desktop install
-
-Alternatively, install [Git](https://git-scm.com/downloads) and clone the repository:
+### Step 2: Clone the repository
 
 ```bat
 git clone https://github.com/ToontownSuperForeverMVP/toontown-apocalypse.git
 cd toontown-apocalypse
 ```
-
-For a Git checkout, update the project with GitHub Desktop's **Pull origin** action or with plain Git:
-
-```bat
-git pull --ff-only origin main
-```
-
-After updating a Git/GitHub Desktop checkout, start the game directly with **`launch/windows/start-all.bat`**. That launcher starts the local servers and client; it does not download or replace the repository. Do not use the ZIP updater workflow for a Git checkout.
 
 ### Step 3: Download the Panda3D runtime
 
@@ -104,15 +87,19 @@ Panda3D/python/ppython.exe
 
 i.e. a `Panda3D/` folder at the repository root containing `python/ppython.exe`. The runtime is intentionally ignored by Git because it is a local engine distribution rather than project source, so it will never appear in your commits.
 
-### Step 4: Start the game
+### Step 4: (Recommended) Get a graphical frontend
 
-Use the launcher for your install type from step 2. For a ZIP/local install, use the root `start.bat` so the update check runs first. For a Git/GitHub Desktop checkout, use `launch/windows/start-all.bat` directly. Either launcher starts Astron, the UberDOG, the AI server, and the game client, and streams all of their output into one colored console. On first run it will ask for a player name and district name (defaults are fine) and save them to `launch/windows/launcher_config.json` — a local settings file that is ignored by Git. It also installs the Python dependencies from `requirements.txt` into the bundled interpreter on first run.
+If you are not comfortable with Git, download the repository as a ZIP from the GitHub "Code" button instead of cloning, then extract it and place `Panda3D/` inside as described in step 3.
+
+### Step 5: Start the game
+
+Double-click `launch/windows/start-all.bat` (or run it from a terminal). It starts Astron, the UberDOG, the AI server, and the game client, and streams all of their output into one colored console. On first run it will ask for a player name and district name (defaults are fine) and save them to `launch/windows/launcher_config.json` — a local settings file that is ignored by Git. It also installs the Python dependencies from `requirements.txt` into the bundled interpreter on first run.
 
 Wait for all four services to report ready, and the game window will open. Log in with the name you chose — you will go through Make-A-Toon and then the tutorial.
 
 To start services individually instead, use the scripts under `build/scripts/` (`start_servers.bat`, `start_client.bat`) or the legacy ones under `win32/`.
 
-### Step 5: Verify your install
+### Step 6: Verify your install
 
 Once in-game:
 

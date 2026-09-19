@@ -9,13 +9,13 @@ from otp.avatar import DistributedAvatar
 from . import Suit
 from toontown.toonbase import ToontownGlobals
 from toontown.battle import DistributedBattle
-from toontown.battle import SuitBattleGlobals
 from direct.fsm import ClassicFSM, State
 from direct.fsm import State
 from . import SuitTimings
 from . import SuitBase
 from . import DistributedSuitPlanner
 from direct.directnotify import DirectNotifyGlobal
+from . import SuitDialog
 from toontown.battle import BattleProps
 from toontown.distributed.DelayDeletable import DelayDeletable
 import math
@@ -493,11 +493,11 @@ class DistributedSuit(DistributedSuitBase.DistributedSuitBase, DelayDeletable):
 
     def _updateActionAnimForState(self, state):
         if state == ActionGlobals.COG_ALERT:
-            # Brush-offs only have dedicated entries for a few legacy Cogs;
-            # their fallback is the generic "It's my day off." pool. Action
-            # Cogs should use the same per-Cog taunts as battle face-offs.
-            phrase = SuitBattleGlobals.getFaceoffTaunt(
-                self.getStyleName(), self.doId)
+            # The action localizer fallback is literally "!". Use the normal
+            # Cog dialogue pool so a sighting is an actual Cog phrase.
+            phrase = SuitDialog.getBrushOffText(
+                self.getStyleName(),
+                SuitDialog.getBrushOffIndex(self.getStyleName()))
             self.setChatAbsolute(phrase, CFSpeech | CFTimeout)
             self._setActionAnim('neutral')
         elif state == ActionGlobals.COG_LURED:
