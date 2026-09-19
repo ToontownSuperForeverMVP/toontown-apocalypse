@@ -333,7 +333,11 @@ class StreetDirectorAI(DirectObject):
         toon = self.air.doId2do.get(avId)
         if toon is None or getattr(toon, 'actionSafe', False):
             return None
-        return toon
+        hp = getattr(toon, 'hp', None)
+        if hp is None:
+            getHp = getattr(toon, 'getHp', None)
+            hp = getHp() if getHp is not None else 0
+        return toon if hp > 0 else None
 
     def getEngageableToons(self):
         toons = []
@@ -341,8 +345,12 @@ class StreetDirectorAI(DirectObject):
             if avId in self.safeToons:
                 continue
             toon = self.air.doId2do.get(avId)
+            hp = getattr(toon, 'hp', None) if toon is not None else None
+            if hp is None and toon is not None:
+                getHp = getattr(toon, 'getHp', None)
+                hp = getHp() if getHp is not None else 0
             if (toon is not None and not getattr(toon, 'actionSafe', False)
-                    and getattr(toon, 'hp', 0) > 0):
+                    and hp > 0):
                 toons.append(toon)
         return toons
 

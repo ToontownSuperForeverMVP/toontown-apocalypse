@@ -34,3 +34,6 @@ venv/
 output/
 release/
 apworld/toontown.apworld
+
+# Root launcher update cache
+downloads/

@@ -65,6 +65,16 @@ def _distancePointToSegment(point, a, b):
     return (Vec3(point - closest)).length()
 
 
+def _toonAlive(toon):
+    if toon is None:
+        return False
+    hp = getattr(toon, 'hp', None)
+    if hp is None:
+        getHp = getattr(toon, 'getHp', None)
+        hp = getHp() if getHp is not None else 0
+    return hp > 0
+
+
 class CogCombatControllerAI:
     notify = DirectNotifyGlobal.directNotify.newCategory('CogCombatControllerAI')
 
@@ -88,6 +98,7 @@ class CogCombatControllerAI:
         self.targetId = 0
         self.lostTargetSince = None
         self.pos = Point3(0, 0, 0)
+        self.groundZ = None
         self.heading = 0.0
         self.havePos = False
         self.mutation = -1
@@ -181,11 +192,13 @@ class CogCombatControllerAI:
         if pos is None:
             return
         self.pos = Point3(pos)
+        if self.groundZ is None:
+            self.groundZ = self.pos.getZ()
+        else:
+            self.pos.setZ(self.groundZ)
         self.havePos = True
         self.suit.setPos(self.pos)
         if not self.director.isRunActive():
-            return
-        if getattr(self.suit, 'legType', None) not in _ENGAGEABLE_LEG_TYPES:
             return
         detectRange = profile.detectRange
         best = None
@@ -248,7 +261,7 @@ class CogCombatControllerAI:
         if not self.targetId:
             return None
         toon = self.director.getActiveToon(self.targetId)
-        if toon is None or getattr(toon, 'hp', 0) <= 0:
+        if not _toonAlive(toon):
             return None
         return toon
 
@@ -343,12 +356,10 @@ class CogCombatControllerAI:
             moveVec += self._separation(step)
             self.pos = Point3(self.pos + moveVec)
 
-        # Keep the Cog roughly on the Toon's floor height when close enough
-        # that it matters; otherwise ease toward the waypoint height.
-        if distance < 25.0:
-            self.pos.setZ(self.pos.getZ() + (toonPos.getZ() - self.pos.getZ()) * min(1.0, dt * 3.0))
-        elif self.navPath:
-            self.pos.setZ(self.pos.getZ() + (self.navPath[0].getZ() - self.pos.getZ()) * min(1.0, dt * 3.0))
+        # Street Cogs are grounded actors. Following the Toon's Z coordinate
+        # made a jumping Toon slowly lift the Cog into the air.
+        if self.groundZ is not None:
+            self.pos.setZ(self.groundZ)
 
         heading = _headingTo(self.pos, toonPos)
         if heading is not None:
@@ -472,14 +483,14 @@ class CogCombatControllerAI:
         realtime = attack['rt']
         hit = self._resolveHit(attack, toon)
         damage = 0
-        if hit and getattr(toon, 'hp', 0) > 0:
+        if hit and _toonAlive(toon):
             damage = attack['damage']
             toon.takeDamage(damage)
         self.suit.sendUpdate('actionAttackResolved', [realtime.attackId, toon.doId, damage])
         self.director.onAttackResolved(self, toon, realtime, damage)
 
         attack['pulsesLeft'] -= 1
-        if attack['pulsesLeft'] > 0 and getattr(toon, 'hp', 0) > 0:
+        if attack['pulsesLeft'] > 0 and _toonAlive(toon):
             # Second pulse / double tap: re-aim at where the Toon is now and
             # tell the client so it can show the follow-up.
             toonPos = Point3(toon.getPos())
@@ -547,7 +558,8 @@ class CogCombatControllerAI:
                 delta.normalize()
                 step = ActionGlobals.getCogSpeed(self.role, profile) * self.LURED_SPEED_FRACTION * dt
                 self.pos = Point3(self.pos + delta * min(step, distance - 3.0))
-                self.pos.setZ(self.pos.getZ() + (toonPos.getZ() - self.pos.getZ()) * min(1.0, dt * 3.0))
+                if self.groundZ is not None:
+                    self.pos.setZ(self.groundZ)
             heading = _headingTo(self.pos, toonPos)
             if heading is not None:
                 self.heading = heading

@@ -1261,9 +1261,13 @@ class DistributedSuitPlannerAI(DistributedObjectAI.DistributedObjectAI, SuitPlan
         levelRange = self.SuitHoodInfo[self.hoodInfoIdx][self.SUIT_HOOD_INFO_LEVEL_RANGE]
         if type == None:
             if ZoneUtil.isCogHQZone(self.SuitHoodInfo[self.hoodInfoIdx][self.SUIT_HOOD_INFO_ZONE]):
-                typeChoices = list(range(max(level - levelRange, 1), min(level, self.MAX_SUIT_TYPES_HQ) + 1))
+                maxType = min(level, self.MAX_SUIT_TYPES_HQ)
             else:
-                typeChoices = list(range(max(level - levelRange, 1), min(level, self.MAX_SUIT_TYPES) + 1))
+                maxType = min(level, self.MAX_SUIT_TYPES)
+            # Director tiers can raise the actual Cog level beyond the
+            # highest available Cog type. Keep the lower bound valid.
+            minType = max(1, min(level - levelRange, maxType))
+            typeChoices = list(range(minType, maxType + 1))
             type = random.choice(typeChoices)
 
         if level not in ToontownGlobals.SuitLevels:

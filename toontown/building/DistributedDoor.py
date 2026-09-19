@@ -401,8 +401,11 @@ class DistributedDoor(DistributedObject.DistributedObject, DelayDeletable):
     def doorTrigger(self, args = None):
         self.ignore(self.getEnterTriggerEvent())
         if args is not None:
-            self.currentDoorNp = NodePath(args.getIntoNodePath())
-            self.currentDoorVec = Vec3(args.getSurfaceNormal(self.currentDoorNp))
+            # The collision trigger is a volume, not the doorway plane. Its
+            # local origin varies by model, so measure crossing against the
+            # actual door origin instead.
+            self.currentDoorNp = self.getDoorNodePath()
+            self.currentDoorVec = Vec3(args.getSurfaceNormal(args.getIntoNodePath()))
         else:
             self.currentDoorNp = self.getDoorNodePath()
             self.currentDoorVec = Vec3(0, 1, 0)

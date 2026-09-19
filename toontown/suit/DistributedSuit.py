@@ -493,7 +493,12 @@ class DistributedSuit(DistributedSuitBase.DistributedSuitBase, DelayDeletable):
 
     def _updateActionAnimForState(self, state):
         if state == ActionGlobals.COG_ALERT:
-            self.setChatAbsolute(TTLocalizer.ActionCogNoticed, CFSpeech | CFTimeout)
+            # The action localizer fallback is literally "!". Use the normal
+            # Cog dialogue pool so a sighting is an actual Cog phrase.
+            phrase = SuitDialog.getBrushOffText(
+                self.getStyleName(),
+                SuitDialog.getBrushOffIndex(self.getStyleName()))
+            self.setChatAbsolute(phrase, CFSpeech | CFTimeout)
             self._setActionAnim('neutral')
         elif state == ActionGlobals.COG_LURED:
             self._setActionAnim('lured')
