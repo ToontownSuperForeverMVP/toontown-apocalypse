@@ -180,7 +180,7 @@ class Street(BattlePlace.BattlePlace):
                 # elevator-to-interior transfer.  It must not turn a normal
                 # street exit into a run that survives forever.
                 self.streetRun.cancelBuilding()
-                self.streetRun.destroy()
+                self.streetRun.destroy(deferEndPanel=self._isPlaygroundExit())
             self.streetRun = None
         # Place.enterTunnelIn can leave a retry task behind when a tunnel
         # origin is not ready.  It must not call back into an unloaded Street.
@@ -321,6 +321,11 @@ class Street(BattlePlace.BattlePlace):
         return bool(status and status.get('how') == 'tunnelIn'
                     and status.get('where') == 'street'
                     and status.get('shardId') is None)
+
+    def _isPlaygroundExit(self):
+        status = getattr(self, 'doneStatus', None)
+        return bool(status and status.get('loader') == 'safeZoneLoader'
+                    and status.get('where') == 'playground')
 
     def _isActionBuildingTransferExit(self):
         status = getattr(self, 'doneStatus', None)

@@ -33,6 +33,7 @@ class StreetRun(DirectObject):
     # Coming back from a shop within this window skips the tier prompt.
     REPROMPT_GRACE = 300.0
     PLANNER_WAIT_TIMEOUT = 12.0
+    END_PANEL_WAIT_TIMEOUT = 10.0
 
     def __init__(self, street):
         DirectObject.__init__(self)
@@ -54,6 +55,8 @@ class StreetRun(DirectObject):
         self.endMode = None
         self.buildingActive = False
         self.streetTransitionPending = False
+        self.pendingEndPanel = None
+        self.endPanelWaitTask = None
         base.actionStreetRun = self
 
     # ------------------------------------------------------------------
@@ -88,7 +91,7 @@ class StreetRun(DirectObject):
         if planner is not None:
             self.__primeHudFromPlanner(planner)
 
-    def exit(self, force=False):
+    def exit(self, force=False, deferEndPanel=False):
         if not self.entered and not force:
             return
         self.entered = False
@@ -99,9 +102,16 @@ class StreetRun(DirectObject):
             self.closeLoadout()
             return
         if self.runStarted and self.endMode is None:
-            # Extraction reports live above place teardown, so the player gets
-            # to read what the run actually paid before the next zone loads.
-            self._showEndPanel(escaped=True)
+            if deferEndPanel:
+                # Do not put a modal DirectGUI overlay in the middle of the
+                # Street -> hood -> playground handoff.  The old behavior
+                # created the report from Street.exit(), which could leave the
+                # new playground loaded underneath a panel that still owned
+                # the transition.  Keep the snapshot alive until the safe
+                # zone announces that it is ready.
+                self._queueEndPanel()
+            else:
+                self._showEndPanel(escaped=True)
         if self.runStarted:
             planner = self.getPlanner()
             if planner is not None:
@@ -127,15 +137,44 @@ class StreetRun(DirectObject):
         # Keep the HUD, tier, and runStarted flag alive.  The destination
         # street reattaches this same object after its planner generates.
 
-    def destroy(self):
+    def destroy(self, deferEndPanel=False):
         # A preserved building/connector run is intentionally detached from
         # its old Street.  If that Street is later being destroyed for a
         # real exit, force the teardown so an already-detached run cannot
         # remain registered forever.
-        self.exit(force=True)
+        self.exit(force=True, deferEndPanel=deferEndPanel)
         if getattr(base, 'actionStreetRun', None) is self:
             base.actionStreetRun = None
         self.street = None
+
+    def _queueEndPanel(self):
+        if self.hud is None:
+            return
+        self.pendingEndPanel = (self.streetName, self.hud.getRunSummary())
+        self.acceptOnce('enterPlayground', self.__showQueuedEndPanel)
+        taskName = 'actionRunEndPanelWait-%d' % id(self)
+        self.endPanelWaitTask = taskMgr.doMethodLater(
+            self.END_PANEL_WAIT_TIMEOUT, self.__showQueuedEndPanelFallback, taskName)
+
+    def __showQueuedEndPanelFallback(self, task):
+        self.endPanelWaitTask = None
+        self.__showQueuedEndPanel()
+        return Task.done
+
+    def __showQueuedEndPanel(self):
+        if self.endPanelWaitTask is not None:
+            taskMgr.remove(self.endPanelWaitTask)
+            self.endPanelWaitTask = None
+        self.ignore('enterPlayground')
+        if self.pendingEndPanel is None:
+            return
+        streetName, summary = self.pendingEndPanel
+        self.pendingEndPanel = None
+        existing = getattr(base, 'actionRunEndPanel', None)
+        if existing is not None:
+            existing.destroy()
+        self.endMode = 'escaped'
+        base.actionRunEndPanel = RunEndPanel(streetName, summary, True)
 
     def beginBuilding(self):
         self.buildingActive = True

@@ -76,6 +76,8 @@ class RunEndPanel(DirectObject):
 
     def destroy(self):
         self.ignoreAll()
+        if getattr(base, 'actionRunEndPanel', None) is self:
+            base.actionRunEndPanel = None
         if getattr(self, 'track', None):
             self.track.finish()
             self.track = None
