@@ -91,7 +91,7 @@ class Street(BattlePlace.BattlePlace):
          State.State('teleportOut', self.enterTeleportOut, self.exitTeleportOut, ['teleportIn', 'quietZone']),
          State.State('died', self.enterDied, self.exitDied, ['quietZone']),
          State.State('tunnelIn', self.enterTunnelIn, self.exitTunnelIn, ['walk']),
-         State.State('tunnelOut', self.enterTunnelOut, self.exitTunnelOut, ['final']),
+         State.State('tunnelOut', self.enterTunnelOut, self.exitTunnelOut, ['final', 'walk']),
          State.State('quietZone', self.enterQuietZone, self.exitQuietZone, ['teleportIn']),
          State.State('quest', self.enterQuest, self.exitQuest, ['walk', 'stopped']),
          State.State('stopped', self.enterStopped, self.exitStopped, ['walk']),
@@ -275,13 +275,40 @@ class Street(BattlePlace.BattlePlace):
         self.elevator = Elevator.Elevator(self.fsm.getStateNamed('elevator'), self.elevatorDoneEvent, distElevator)
         self.elevator.load()
         self.elevator.enter()
+        if getattr(self.elevator, 'actionBuilding', False):
+            # ``exitWalk`` ran while entering this FSM state, which normally
+            # disables the avatar controller for the legacy elevator movie.
+            # Action buildings are physical spaces: the Toon must be able to
+            # walk around inside the cab, use E, and leave before the doors
+            # close.  Restore the normal movement stack after the elevator
+            # state has taken ownership of the camera.
+            self.__enableActionElevatorMovement()
 
     def exitElevator(self):
+        if getattr(getattr(self, 'elevator', None), 'actionBuilding', False):
+            self.__disableActionElevatorMovement()
         base.localAvatar.cantLeaveGame = 0
         self.ignore(self.elevatorDoneEvent)
         self.elevator.unload()
         self.elevator.exit()
         del self.elevator
+
+    def __enableActionElevatorMovement(self):
+        avatar = base.localAvatar
+        avatar.collisionsOn()
+        avatar.enableAvatarControls()
+        avatar.attachCamera()
+        avatar.startUpdateSmartCamera()
+        avatar.startPosHprBroadcast()
+        avatar.startTrackAnimToSpeed()
+
+    def __disableActionElevatorMovement(self):
+        avatar = base.localAvatar
+        avatar.stopTrackAnimToSpeed()
+        avatar.stopUpdateSmartCamera()
+        avatar.stopPosHprBroadcast()
+        avatar.disableAvatarControls()
+        avatar.collisionsOff()
 
     def detectedElevatorCollision(self, distElevator):
         if self.streetRun is not None and getattr(getattr(distElevator, 'bldg', None), 'actionBuilding', False):

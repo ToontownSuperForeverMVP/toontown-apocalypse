@@ -290,10 +290,16 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
         self.d_setSuits()
         self.__resetResponses()
         self.d_setState('Elevator')
-        self.timer.startCallback(BattleBase.ELEVATOR_T + ElevatorData[ELEVATOR_NORMAL]['openTime'] + BattleBase.SERVER_BUFFER_TIME, self.__serverElevatorDone)
+        if not self.actionBuilding:
+            self.timer.startCallback(BattleBase.ELEVATOR_T + ElevatorData[ELEVATOR_NORMAL]['openTime'] + BattleBase.SERVER_BUFFER_TIME, self.__serverElevatorDone)
         return None
 
     def __serverElevatorDone(self):
+        if self.actionBuilding:
+            # The client action elevator sends elevatorDone only after its
+            # physical door-open interval completes.  Do not wake the Cogs
+            # from a server-side timer while the player is still in transit.
+            return
         self.ignoreElevatorDone = 1
         self.b_setState('Battle')
 
