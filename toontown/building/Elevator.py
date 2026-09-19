@@ -13,7 +13,7 @@ class Elevator(StateData.StateData):
 
     def __init__(self, elevatorState, doneEvent, distElevator):
         StateData.StateData.__init__(self, doneEvent)
-        self.fsm = ClassicFSM.ClassicFSM('Elevator', [State.State('start', self.enterStart, self.exitStart, ['elevatorDFA']),
+        self.fsm = ClassicFSM.ClassicFSM('Elevator', [State.State('start', self.enterStart, self.exitStart, ['elevatorDFA', 'requestBoard']),
          State.State('elevatorDFA', self.enterElevatorDFA, self.exitElevatorDFA, ['requestBoard', 'final']),
          State.State('requestBoard', self.enterRequestBoard, self.exitRequestBoard, ['boarding']),
          State.State('boarding', self.enterBoarding, self.exitBoarding, ['boarded']),
