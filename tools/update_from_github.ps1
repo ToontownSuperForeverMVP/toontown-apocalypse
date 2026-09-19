@@ -8,6 +8,7 @@ param(
 $ErrorActionPreference = "Stop"
 $downloadDirectory = Join-Path $ProjectRoot "downloads"
 $archivePath = Join-Path $downloadDirectory "toontown-apocalypse-main.zip"
+$partialArchivePath = "$archivePath.download"
 $commitPath = Join-Path $downloadDirectory "main.commit"
 $apiUrl = "https://api.github.com/repos/$Repository/commits/$Branch"
 $archiveUrl = "https://github.com/$Repository/archive/refs/heads/$Branch.zip"
@@ -33,7 +34,14 @@ if ($commit -eq $installedCommit) {
 $temporaryDirectory = Join-Path ([IO.Path]::GetTempPath()) ("ttap-update-" + [guid]::NewGuid().ToString("N"))
 try {
     Write-Status "Downloading main at $($commit.Substring(0, 7))..."
-    Invoke-WebRequest -Uri $archiveUrl -Headers $headers -OutFile $archivePath
+    if (Test-Path $partialArchivePath) {
+        Remove-Item -LiteralPath $partialArchivePath -Force
+    }
+    Invoke-WebRequest -Uri $archiveUrl -Headers $headers -OutFile $partialArchivePath -TimeoutSec 600
+    if ((Get-Item -LiteralPath $partialArchivePath).Length -eq 0) {
+        throw "GitHub returned an empty archive."
+    }
+    Move-Item -LiteralPath $partialArchivePath -Destination $archivePath -Force
 
     New-Item -ItemType Directory -Force -Path $temporaryDirectory | Out-Null
     Expand-Archive -LiteralPath $archivePath -DestinationPath $temporaryDirectory -Force
