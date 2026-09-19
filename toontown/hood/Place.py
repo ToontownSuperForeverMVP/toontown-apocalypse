@@ -3,7 +3,7 @@ from panda3d.core import *
 from toontown.toonbase.ToonBaseGlobal import *
 from direct.directnotify import DirectNotifyGlobal
 from direct.fsm import StateData
-from otp.otpbase.PythonUtil import PriorityCallbacks
+from otp.otpbase.PythonUtil import PriorityCallbacks, uniqueName
 from toontown.safezone import PublicWalk
 from toontown.launcher import DownloadForceAcknowledge
 from . import TrialerForceAcknowledge
@@ -656,7 +656,7 @@ class Place(StateData.StateData, FriendsListManager.FriendsListManager):
         # tunnelOut forever.  Give the normal callback three seconds to win;
         # otherwise mirror the user's ~stuck recovery and return control to
         # the movement state.
-        self._tunnelOutRecoveryTaskName = self.uniqueName('tunnelOutRecovery')
+        self._tunnelOutRecoveryTaskName = uniqueName('tunnelOutRecovery')
         taskMgr.remove(self._tunnelOutRecoveryTaskName)
         taskMgr.doMethodLater(3.0, self._recoverTunnelOut, self._tunnelOutRecoveryTaskName)
         base.localAvatar.tunnelOut(tunnelOrigin)
