@@ -20,6 +20,8 @@ class RoguesGallery(StateData.StateData):
         self.xSpaceBetweenSameSuits = 0.0
         self.ySpaceBetweenSuits = 0.05
         self.labelScale = 1.0
+        self._controlsWereEnabled = False
+        self._cameraWasActive = False
 
     def load(self):
         if StateData.StateData.load(self):
@@ -48,6 +50,15 @@ class RoguesGallery(StateData.StateData):
 
     def enter(self):
         if StateData.StateData.enter(self):
+            avatar = getattr(base, 'localAvatar', None)
+            if avatar is not None:
+                self._controlsWereEnabled = bool(getattr(avatar, 'avatarControlsEnabled', False))
+                cameraController = getattr(avatar, 'orbitalCamera', None)
+                self._cameraWasActive = bool(cameraController is not None and cameraController.isActive())
+                if self._cameraWasActive:
+                    cameraController.stop()
+                if self._controlsWereEnabled:
+                    avatar.disableAvatarControls()
             render.hide()
             aspect2d.hide()
             self.gallery.reparentTo(render2d)
@@ -64,6 +75,16 @@ class RoguesGallery(StateData.StateData):
             self.gallery.clearMat()
             base.setBackgroundColor(ToontownGlobals.DefaultBackgroundColor)
             self.ignoreAll()
+            avatar = getattr(base, 'localAvatar', None)
+            if avatar is not None:
+                if self._controlsWereEnabled:
+                    avatar.enableAvatarControls()
+                if self._cameraWasActive:
+                    cameraController = getattr(avatar, 'orbitalCamera', None)
+                    if cameraController is not None:
+                        cameraController.start()
+            self._controlsWereEnabled = False
+            self._cameraWasActive = False
 
     def animate(self):
         self.load()

@@ -83,8 +83,10 @@ class DistributedCogHQDoor(DistributedDoor.DistributedDoor):
 
     def enterDoor(self):
         if self.allowedToEnter(self.zoneId):
-            messenger.send('DistributedDoor_doorTrigger')
-            self.sendUpdate('requestEnter')
+            # Use the shared E-driven door flow. The zone transition waits
+            # until the toon actually crosses the HQ doorway.
+            self._sourceAccessGranted = True
+            DistributedDoor.DistributedDoor.enterDoor(self)
         else:
             place = base.cr.playGame.getPlace()
             if place:

@@ -41,6 +41,8 @@ class TownBattle(StateData.StateData):
         self.localNum = 0
         self.time = 0
         self.bldg = 0
+        self.creditMultiplier = 1
+        self.tutorialFlag = 0
         self.track = -1
         self.level = -1
         self.target = 0

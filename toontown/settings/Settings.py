@@ -31,6 +31,7 @@ class ControlSettings:
     ACTION_BUTTON: str = "delete"
     SECONDARY_ACTION: str = "insert"
     CHAT_HOTKEY: str = "t"
+    LOADOUT_HOTKEY: str = "l"
 
 
 class Settings:
@@ -73,7 +74,7 @@ class Settings:
         'discord-rich-presence': False,
         "color-blind-mode": False,
     }
-    settingsFile = Path.home() / "Documents" / "Super CFO" / "settings.json"
+    settingsFile = Path.home() / "Documents" / "Toontown Apocalypse" / "settings.json"
 
 
     def __init__(self) -> None:

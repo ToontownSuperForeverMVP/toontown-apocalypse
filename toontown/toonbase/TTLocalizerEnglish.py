@@ -236,7 +236,7 @@ QuestsDefaultReject = ("Looking for a specific item? Use !hint and then the item
  "Items that display with purple text are likely important, try grabbing ToonTasks with them!",
  'All Toons within the same team are friends automatically!',
  'You can see the HP of a ' + Cog + ' by clicking on them.',
- 'Gather the Archipelago Treasures in each location to give out easy checks! They are the ones that look like a bunch of circles.',
+ 'Gather the Apocalypse Treasures in each location to give out easy checks! They are the ones that look like a bunch of circles.',
  Cog + ' Buildings are a great place to fill out your ' + Cog + ' Gallery!',
  'To get more gags, visit a Gag Clerk! They are present in all Playgrounds, on every street, and in ' + Cog + ' HQs.',
  'You gain more Laff points by receiving Laff Boost items.',
@@ -2781,7 +2781,7 @@ SuitAttackTaunts = {'AUDIT': ["I believe your books don't balance.",
               "You aren't above the law!",
               'There should be a law against you.',
               "There's no ex post facto with me!",
-              "The opinions expressed in this attack are not those of Toontown: Archipelago.",
+              "The opinions expressed in this attack are not those of Toontown Apocalypse.",
               'We cannot be held responsible for damages suffered in this attack.',
               'Your results for this attack may vary.',
               'This attack is void where prohibited.',
@@ -4185,7 +4185,7 @@ LauncherPhaseNames = {0: 'Initialization',
  13: 'Parties',
  14: 'AP'}
 LauncherProgress = '%(name)s (%(current)s of %(total)s)'
-LauncherStartingMessage = "Starting Super CFO... "
+LauncherStartingMessage = "Starting Toontown Apocalypse... "
 LauncherDownloadFile = 'Downloading update for ' + LauncherProgress + '...'
 LauncherDownloadFileBytes = 'Downloading update for ' + LauncherProgress + ': %(bytes)s'
 LauncherDownloadFilePercent = 'Downloading update for ' + LauncherProgress + ': %(percent)s%%'
@@ -4195,13 +4195,13 @@ LauncherExtractingFile = 'Extracting update for ' + LauncherProgress + '...'
 LauncherExtractingPercent = 'Extracting update for ' + LauncherProgress + ': %(percent)s%%'
 LauncherPatchingFile = 'Applying update for ' + LauncherProgress + '...'
 LauncherPatchingPercent = 'Applying update for ' + LauncherProgress + ': %(percent)s%%'
-LauncherConnectProxyAttempt = 'Connecting to Toontown: %s (proxy: %s) attempt: %s'
-LauncherConnectAttempt = 'Connecting to Toontown: %s attempt %s'
+LauncherConnectProxyAttempt = 'Connecting to Toontown Apocalypse: %s (proxy: %s) attempt: %s'
+LauncherConnectAttempt = 'Connecting to Toontown Apocalypse: %s attempt %s'
 LauncherDownloadServerFileList = 'Updating Toontown...'
 LauncherCreatingDownloadDb = 'Updating Toontown...'
 LauncherDownloadClientFileList = 'Updating Toontown...'
 LauncherFinishedDownloadDb = 'Updating Toontown... '
-LauncherStartingGame = 'Starting Super CFO...'
+LauncherStartingGame = 'Starting Toontown Apocalypse...'
 LauncherRecoverFiles = 'Updating Toontown. Recovering files...'
 LauncherCheckUpdates = 'Checking for updates for ' + LauncherProgress
 LauncherVerifyPhase = 'Updating Toontown...'
@@ -9999,6 +9999,7 @@ OptionNames = {
     "ACTION_BUTTON": "Action Button",
     "SECONDARY_ACTION": "Secondary Action Button",
     "CHAT_HOTKEY": "Chat Button",
+    "LOADOUT_HOTKEY": "Gag Album Hotkey",
 
     # Video
     "borderless": "Borderless Window",
@@ -10057,3 +10058,115 @@ OptionDisabled = "Disabled"
 OptionRefresh = "Refresh"
 WinConditionMet = 'Congratulations, you have completed your goal! You may now talk to Flippy to redeem your reward!'
 RefreshDialogMsg = "Refreshing audio devices..."
+
+# ---------------------------------------------------------------------------
+# Toontown Apocalypse: real-time street combat
+# ---------------------------------------------------------------------------
+ActionCogNoticed = '!'
+ActionCacheLabel = 'GAG CACHE'
+ActionUnknownStreet = 'Unknown Street'
+ActionHudTier = 'TIER %d'
+ActionHudPressure = 'COG PRESSURE'
+ActionChain = '%d COG CHAIN  -  +%d%% REWARDS'
+ActionLaffReadout = 'LAFF  %d / %d'
+ActionHudObjectives = 'CONTRACT'
+ActionHudKills = 'Cogs defeated: %d'
+ActionHudBeans = 'Beans: %d'
+ActionStageNames = ('CALM', 'ACTIVE', 'ALERT', 'CRACKDOWN', 'LOCKDOWN', 'INVASION')
+ActionStageBanners = ('The street is quiet.',
+                      'The Cogs are getting organized.',
+                      'Cog patrols are actively hunting you.',
+                      'Executives have been dispatched to this street.',
+                      'Reinforcements are pouring in. Rewards are climbing.',
+                      'The street is at war. Leave whenever you dare.')
+ActionObjectiveText = {0: 'Defeat %(target)d Cogs',
+                       1: 'Defeat %(target)d %(dept)ss',
+                       2: 'Defeat %(target)d Cogs of level %(param)d+',
+                       3: 'Dodge %(target)d Cog attacks',
+                       4: 'Push Cog Pressure to %(stage)s',
+                       5: 'Defeat %(target)d Executive Cogs',
+                       6: 'Find a Gag Cache',
+                       7: 'Land %(target)d %(track)s hits',
+                       8: 'Build a %(target)d Cog chain'}
+ActionObjectiveComplete = 'CONTRACT COMPLETE: +%(beans)d beans, +%(xp)d %(track)s mastery'
+ActionContractClearedTitle = 'CONTRACT CLEARED!'
+ActionContractCleared = 'Bonus payout: %d beans. New contract posted.'
+ActionRunStarted = 'STREET RUN - TIER %d'
+ActionTierHintBanner = 'Cogs are hunting. Stay longer for bigger rewards.'
+ActionToonDown = 'A Toon went sad!'
+ActionCacheSpawned = 'A Gag Cache appeared somewhere on this street!'
+ActionEliteSpawned = 'An Executive Cog (level %d) has arrived!'
+ActionBreakthrough = 'STREET BREAKTHROUGH! +%d beans. Cog Pressure reduced.'
+ActionDodged = 'DODGED!'
+ActionNewTrack = 'NEW GAG TRACK DISCOVERED'
+ActionNewTrackSub = '%s has been added to your Gag Album. Equip it with L.'
+ActionCacheBeans = 'Gag Cache: +%d beans'
+ActionKillToast = '+%d beans'
+ActionXpToast = '+%d %s mastery'
+ActionToonUpToast = '+%d Laff'
+ActionTierTitle = 'CHOOSE A DIFFICULTY TIER'
+ActionTierDetails = 'Cog level +%(level)d    Rewards x%(reward).2f    Extra patrols +%(pop)d    Attack mutation %(mut)d'
+ActionTierFlavor = ('A warm-up. Cogs telegraph everything and wander alone.',
+                    'Cogs start leading their shots and travelling in pairs.',
+                    'Faster wind-ups, wider attacks and the first Executives.',
+                    'Cogs strafe, chain attacks and recover while moving.',
+                    'Corporate warfare. Everything that can hurt you will try.')
+ActionTierPower = 'Toon Power Rating: %d'
+ActionTierConfirm = 'Enter the Street'
+ActionTierLoadout = 'Gag Album'
+ActionTierHint = 'Arrow keys or number keys pick a tier. Enter confirms.'
+ActionLoadoutTitle = 'GAG ALBUM'
+ActionLoadoutSubtitle = 'Carry up to %d tracks. Swapping never costs mastery.'
+ActionLoadoutLocked = 'UNDISCOVERED - find a Gag Cache on any street'
+ActionLoadoutTier = 'Tier %s'
+ActionLoadoutMastery = 'Mastery %d / %d'
+ActionLoadoutXp = 'Mastery %d / %d'
+ActionLoadoutBuy = 'Buy Tier %s (%d beans)'
+ActionLoadoutNeedXp = 'Needs %d mastery'
+ActionLoadoutEquip = 'Equip'
+ActionLoadoutUnequip = 'Slot %d - Unequip'
+ActionLoadoutFull = 'Loadout full'
+ActionLoadoutClose = 'Close'
+ActionLoadoutBeans = 'Jellybeans: %d'
+ActionPurchaseSuccess = '%s upgraded to Tier %s!'
+ActionPurchaseFail = 'Could not upgrade %s.'
+ActionEndEscapedTitle = 'STREET ESCAPED'
+ActionEndEscapedSub = 'You made it out with the haul.'
+ActionEndGameOverTitle = 'GAME OVER'
+ActionEndGameOverSub = 'The Cogs won this round. Your earned rewards are safe.'
+ActionEndContinue = 'Continue'
+ActionEndKills = 'COGS DEFEATED'
+ActionEndBeans = 'BEANS EARNED'
+ActionEndObjectives = 'CONTRACTS CLEARED'
+ActionEndDodges = 'ATTACKS DODGED'
+ActionEndDamage = 'DAMAGE TAKEN'
+ActionEndPressure = 'PEAK PRESSURE'
+ActionEndTime = 'RUN TIME'
+ActionRoman = ('0', 'I', 'II', 'III')
+ActionTrackNames = ('Toon-Up', 'Trap', 'Lure', 'Sound', 'Throw', 'Squirt', 'Drop')
+ActionDeptNames = ('Bossbot', 'Lawbot', 'Cashbot', 'Sellbot')
+ActionSlotEmpty = '---'
+ActionTutorialTitle = 'FIELD TRAINING'
+ActionTutorialProgress = 'Step %d of %d'
+ActionTutorialContinue = 'Continue'
+ActionTutorialSkip = 'Skip Tutorial'
+ActionTutorialComplete = 'TRAINING COMPLETE!'
+ActionTutorialSkipped = 'Training skipped.'
+ActionTutorialStepBeans = '+%d beans'
+ActionTutorialLoadoutValue = 'Tracks equipped: %d / %d'
+ActionTutorialDodgeValue = 'Attempts left: %d'
+ActionTutorialStepNames = ('Welcome',
+ 'Move Out',
+ 'Target Practice',
+ 'Gag Album',
+ 'Dodge',
+ 'Gag Cache',
+ 'Graduate')
+ActionTutorialHints = (
+ 'Shoot Cogs in real time on any street. This quick course covers the basics.',
+ 'Use W A S D to walk. Sprint with Shift. Walk forward to begin.',
+ 'Press Tab for first person, aim with the mouse and click to fire your gag.',
+ 'Press L to open the Gag Album and equip a second track into your 1/2/3 slots.',
+ 'When a Cog winds up an attack, step aside. Attacks only hit where you were.',
+ 'Walk into the spinning safe to discover a brand new gag track.',
+ 'You are ready. Take the tunnel back to the playground and try a street run!')

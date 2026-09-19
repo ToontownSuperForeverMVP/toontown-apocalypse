@@ -1,17 +1,25 @@
+"""AI entry point for the new-Toon tutorial.
+
+A Toon that finishes Make-A-Toon is routed into a private tutorial street.  The
+legacy turn-based battle was replaced by the guided real-time combat tutorial
+in :mod:`toontown.action.tutorial`: this manager still owns the temporary
+zones and the lifecycle, but the actual lesson is run by
+:class:`~toontown.action.tutorial.ActionTutorialManagerAI.ActionTutorialManagerAI`.
+
+Flow::
+
+    requestTutorial   allocate the private zones
+    startTutorial     client loads the tutorial street
+    toonArrived       normalise the Toon, then hand off to the action tutorial
+    allDone           client finished (or skipped) -> deallocate
+
+The player may skip at any point; a skipped tutorial still sets ``tutorialAck``
+so it is not offered again.
+"""
+
 from direct.directnotify import DirectNotifyGlobal
 from direct.distributed.DistributedObjectAI import DistributedObjectAI
 from direct.fsm.FSM import FSM
-
-from toontown.building import DoorTypes
-from toontown.building import FADoorCodes
-from toontown.building.DistributedDoorAI import DistributedDoorAI
-from toontown.building.DistributedTutorialInteriorAI import DistributedTutorialInteriorAI
-from toontown.building.HQBuildingAI import HQBuildingAI
-from toontown.quest import Quests
-from toontown.suit.DistributedTutorialSuitAI import DistributedTutorialSuitAI
-from toontown.toon import NPCToons
-from toontown.toonbase import TTLocalizer
-from toontown.toonbase import ToontownBattleGlobals
 
 
 class TutorialZones:
@@ -21,31 +29,9 @@ class TutorialZones:
     HQ = 0
 
 
-class TutorialBuildingAI:
-    notify = DirectNotifyGlobal.directNotify.newCategory('TutorialBuildingAI')
-
-    def __init__(self, air, street, interior, npcId):
-        self.air = air
-        self.interior = DistributedTutorialInteriorAI(self.air, interior, npcId)
-        self.interior.generateWithRequired(interior)
-        self.door0 = DistributedDoorAI(self.air, 2, DoorTypes.EXT_STANDARD, doorIndex=0)
-        self.insideDoor0 = DistributedDoorAI(self.air, 0, DoorTypes.INT_STANDARD, doorIndex=0)
-        self.door0.setOtherDoor(self.insideDoor0)
-        self.insideDoor0.setOtherDoor(self.door0)
-        self.door0.zoneId = street
-        self.insideDoor0.zoneId = interior
-        self.door0.generateWithRequired(street)
-        self.door0.sendUpdate('setDoorIndex', [self.door0.getDoorIndex()])
-        self.insideDoor0.generateWithRequired(interior)
-        self.insideDoor0.sendUpdate('setDoorIndex', [self.insideDoor0.getDoorIndex()])
-
-    def cleanup(self):
-        self.door0.requestDelete()
-        self.insideDoor0.requestDelete()
-        self.interior.requestDelete()
-
-
 class TutorialFSM(FSM):
+    """Owns the temporary zones for one Toon's tutorial."""
+
     notify = DirectNotifyGlobal.directNotify.newCategory('TutorialFSM')
 
     def __init__(self, air, zones, avId):
@@ -53,67 +39,25 @@ class TutorialFSM(FSM):
         self.air = air
         self.zones = zones
         self.avId = avId
-        self.suit = None
-        self.flippy = None
+        self.forceTransition('Action')
 
-        tutorialTomDesc = NPCToons.NPCToonDict.get(20000)
-        self.tutorialTom = NPCToons.createNPC(self.air, 20000, tutorialTomDesc, self.zones.SHOP, 0)
-        self.tutorialTom.setTutorial(1)
+    def enterAction(self):
+        # The action tutorial starts once the Toon has actually arrived, in
+        # TutorialManagerAI.toonArrived().
+        pass
 
-        hqHarryDesc = (
-            -1, TTLocalizer.TutorialHQOfficerName, ('dls', 'ms', 'm', 'm', 6, 0, 6, 6, 0, 10, 0, 10, 0, 9), 'm', 1,
-            NPCToons.NPC_HQ)
-        self.hqHarry = NPCToons.createNPC(self.air, 20002, hqHarryDesc, self.zones.HQ, 0)
-        self.hqHarry.setTutorial(1)
-
-        self.building = TutorialBuildingAI(self.air, zones.STREET, zones.SHOP, self.tutorialTom.getDoId())
-        self.hq = HQBuildingAI(self.air, zones.STREET, zones.HQ, 1)
-
-        self.forceTransition('Introduction')
-
-    def enterIntroduction(self):
-        self.building.insideDoor0.setDoorLock(FADoorCodes.TALK_TO_TOM)
-
-    def exitIntroduction(self):
-        self.building.insideDoor0.setDoorLock(FADoorCodes.UNLOCKED)
-
-    def enterBattle(self):
-        self.suit = DistributedTutorialSuitAI(self.air)
-        self.suit.generateWithRequired(self.zones.STREET)
-        self.building.door0.setDoorLock(FADoorCodes.DEFEAT_FLUNKY_TOM)
-        self.hq.door0.setDoorLock(FADoorCodes.DEFEAT_FLUNKY_HQ)
-
-    def exitBattle(self):
-        if self.suit:
-            self.suit.requestDelete()
-
-    def enterHQ(self):
-        self.building.door0.setDoorLock(FADoorCodes.TALK_TO_HQ_TOM)
-        self.hq.door0.setDoorLock(FADoorCodes.UNLOCKED)
-        self.hq.insideDoor0.setDoorLock(FADoorCodes.TALK_TO_HQ)
-        self.hq.insideDoor1.setDoorLock(FADoorCodes.TALK_TO_HQ)
-
-    def enterTunnel(self):
-        flippyDesc = NPCToons.NPCToonDict.get(20001)
-        self.flippy = NPCToons.createNPC(self.air, 20001, flippyDesc, self.zones.STREET, 0)
-
-        self.hq.insideDoor1.setDoorLock(FADoorCodes.UNLOCKED)
-        self.hq.door1.setDoorLock(FADoorCodes.GO_TO_PLAYGROUND)
-        self.hq.insideDoor0.setDoorLock(FADoorCodes.WRONG_DOOR_HQ)
-
-    def exitTunnel(self):
-        self.flippy.requestDelete()
+    def exitAction(self):
+        pass
 
     def enterCleanup(self):
-        self.building.cleanup()
-        self.hq.cleanup()
-        self.tutorialTom.requestDelete()
-        self.hqHarry.requestDelete()
-        self.air.deallocateZone(self.zones.BRANCH)
-        self.air.deallocateZone(self.zones.STREET)
-        self.air.deallocateZone(self.zones.SHOP)
-        self.air.deallocateZone(self.zones.HQ)
-        del self.air.tutorialManager.avId2fsm[self.avId]
+        manager = getattr(self.air, 'actionTutorialManager', None)
+        if manager is not None:
+            manager.endSession(self.avId)
+        for zone in (self.zones.BRANCH, self.zones.STREET, self.zones.SHOP, self.zones.HQ):
+            self.air.deallocateZone(zone)
+        fsms = getattr(self.air.tutorialManager, 'avId2fsm', None)
+        if fsms is not None and self.avId in fsms:
+            del fsms[self.avId]
 
 
 class TutorialManagerAI(DistributedObjectAI):
@@ -171,8 +115,10 @@ class TutorialManagerAI(DistributedObjectAI):
         if not av:
             return
 
+        fsm = self.avId2fsm.get(avId)
         if av.getTutorialAck():
-            self.avId2fsm[avId].demand('Cleanup')
+            if fsm:
+                fsm.demand('Cleanup')
             self.air.writeServerEvent('suspicious', avId,
                                       'Attempted to request tutorial when it would be impossible to do so')
             return
@@ -183,12 +129,15 @@ class TutorialManagerAI(DistributedObjectAI):
         av.b_setRewardHistory(0, [])
         av.b_setHp(15)
         av.b_setMaxHp(15)
-
         av.inventory.maxInventory()
-
         av.d_setInventory(av.inventory.makeNetString())
         av.experience.zeroOutExp()
         av.d_setExperience(av.experience.getCurrentExperience())
+
+        # Hand off to the real-time combat tutorial.
+        manager = getattr(self.air, 'actionTutorialManager', None)
+        if fsm is not None and manager is not None:
+            manager.startSession(avId, fsm.zones.STREET)
 
     def allDone(self):
         avId = self.air.getAvatarIdFromSender()

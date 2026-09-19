@@ -419,7 +419,7 @@ class PetshopGUI(DirectObject):
         def showPet(self):
             self.nameLabel = DirectLabel(parent=self, pos=(0, 0, 1.35), relief=None, text=self.petName[self.curPet], text_pos=(0, 0), text_scale=0.04)
             self.apLabel = DirectLabel(parent=self, pos=(-0.01, 0, 1.05), relief=None, text=None, text_fg=Vec4(1, 1, 1, 1), text_pos=(0, 0), text_scale=0.08, text_shadow=(1, 1, 1, 1))
-            self.apLabel.setImage('phase_14/maps/ap_icon_outline.png')
+            self.apLabel.setImage('phase_14/maps/tta-icon.png')
             self.apLabel.setTransparency(TransparencyAttrib.MAlpha)
             self.apLabel['image_scale'] = 0.12
             self.descLabel = DirectLabel(parent=self, pos=(-0.4, 0, 0.72), relief=None, scale=0.05, text=self.petDesc[self.curPet], text_align=TextNode.ALeft, text_wordwrap=TTLocalizer.PGUIwordwrap, text_scale=TTLocalizer.PGUIdescLabel)

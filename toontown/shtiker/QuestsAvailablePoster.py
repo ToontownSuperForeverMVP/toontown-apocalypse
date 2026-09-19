@@ -103,7 +103,7 @@ class TreasureAvailablePoster(QuestsAvailablePoster):
         self.setScale(self.getScale() * 1.3)
 
     def getImageNode(self):
-        return 'phase_14/maps/ap_icon_outline.png'
+        return 'phase_14/maps/tta-icon.png'
 
     def getLocationFromCode(self, hood, index):
         return ToontownGlobals.ARCHI_CODE_TO_LOCATION[hood][index]

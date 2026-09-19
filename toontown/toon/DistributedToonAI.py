@@ -43,6 +43,7 @@ from . import ModuleListAI
 
 from ..shtiker import CogPageGlobals
 from ..util.astron.AstronDict import AstronDict
+from toontown.action import ActionGlobals, ActionProgression
 
 if simbase.wantPets:
     from toontown.pets import PetLookerAI, PetObserve
@@ -78,6 +79,7 @@ class DistributedToonAI(DistributedPlayerAI.DistributedPlayerAI, DistributedSmoo
         if simbase.wantPets:
             PetLookerAI.PetLookerAI.__init__(self)
         self.air = air
+        self.actionSafe = False
         self.dna = ToonDNA.ToonDNA()
         self.inventory = None
         self.fishCollection = None
@@ -123,6 +125,8 @@ class DistributedToonAI(DistributedPlayerAI.DistributedPlayerAI, DistributedSmoo
         self.fishingRod = 0
         self.fishingTrophies = []
         self.trackArray = []
+        # Real-time combat loadout: up to three equipped gag tracks (-1 = empty).
+        self.equippedTracks = [-1] * ActionGlobals.MAX_EQUIPPED_TRACKS
         self.emoteAccess = [0,
                             0,
                             0,
@@ -213,6 +217,11 @@ class DistributedToonAI(DistributedPlayerAI.DistributedPlayerAI, DistributedSmoo
         self.instantDelivery = False
         self.alwaysHitSuits = False
         self.hasPaidTaxes = False
+
+        # Access keys are used by locked doors and elevators.  Keep this
+        # server-side list even when the Archipelago systems are disabled so
+        # those objects can safely query every toon.
+        self.accessKeys: List[int] = []
 
     def generate(self):
         DistributedPlayerAI.DistributedPlayerAI.generate(self)
@@ -1138,6 +1147,12 @@ class DistributedToonAI(DistributedPlayerAI.DistributedPlayerAI, DistributedSmoo
         self.sendUpdate('catalogGenAccessories', [self.doId])
 
     def takeDamage(self, hpLost, quietly=0, sendTotal=1):
+        # Clerk restocking is a short, server-authoritative safe interaction.
+        # Ignore damage already in flight as well as attacks stopped by the
+        # street director, so healing cannot be immediately undone by a stale
+        # Cog hit.
+        if self.actionSafe:
+            return
         if not self.immortalMode:
             if not quietly:
                 self.sendUpdate('takeDamage', [hpLost])
@@ -1818,6 +1833,56 @@ class DistributedToonAI(DistributedPlayerAI.DistributedPlayerAI, DistributedSmoo
         self.experience.fixTrackAccessLimits()
         self.b_setExperience(self.experience.getCurrentExperience())
         self.b_setTrackAccess(self.trackArray)
+
+    # ------------------------------------------------------------------
+    # Real-time combat loadout / gag tier purchases (Toontown Apocalypse)
+    # ------------------------------------------------------------------
+    def b_setEquippedTracks(self, tracks):
+        self.setEquippedTracks(tracks)
+        self.d_setEquippedTracks(self.equippedTracks)
+
+    def d_setEquippedTracks(self, tracks):
+        self.sendUpdate('setEquippedTracks', [tracks])
+
+    def setEquippedTracks(self, tracks):
+        self.equippedTracks = ActionProgression.normalizeLoadout(tracks)
+
+    def getEquippedTracks(self):
+        return self.equippedTracks
+
+    def requestEquipTracks(self, tracks):
+        """Owner-sent: swap the three-track loadout.  Never costs anything."""
+        if self.air.getAvatarIdFromSender() != self.doId:
+            return
+        loadout = ActionProgression.normalizeLoadout(tracks, self)
+        self.b_setEquippedTracks(loadout)
+
+    def requestBuyGagTier(self, track):
+        """Owner-sent: spend jellybeans on the next tier of a discovered track."""
+        if self.air.getAvatarIdFromSender() != self.doId:
+            return
+        try:
+            track = int(track)
+        except (TypeError, ValueError):
+            return
+        if track < 0 or track >= ActionGlobals.NUM_TRACKS:
+            return
+        tier = ActionProgression.getTrackTier(self, track)
+        allowed, reason = ActionGlobals.canPurchaseNextTier(tier, ActionProgression.getTrackXp(self, track),
+                                                            self.getMoney())
+        if not allowed:
+            self.sendUpdateToAvatarId(self.doId, 'gagTierPurchaseResult', [track, tier, 0])
+            return
+        cost = ActionGlobals.getNextTierCost(tier)
+        if not self.takeMoney(cost):
+            self.sendUpdateToAvatarId(self.doId, 'gagTierPurchaseResult', [track, tier, 0])
+            return
+        access = list(self.trackArray or [0] * ActionGlobals.NUM_TRACKS)
+        while len(access) < ActionGlobals.NUM_TRACKS:
+            access.append(0)
+        access[track] = tier + 1
+        self.b_setTrackAccess(access)
+        self.sendUpdateToAvatarId(self.doId, 'gagTierPurchaseResult', [track, tier + 1, 1])
 
     def hasTrackAccess(self, track):
         if self.trackArray and track < len(self.trackArray):
@@ -3799,6 +3864,33 @@ class DistributedToonAI(DistributedPlayerAI.DistributedPlayerAI, DistributedSmoo
 
     def getPinkSlips(self):
         return self.pinkSlips
+
+    def b_setAccessKeys(self, keys: List):
+        self.setAccessKeys(keys)
+        self.d_setAccessKeys(keys)
+
+    def d_setAccessKeys(self, keys: List) -> None:
+        self.sendUpdate('setAccessKeys', [keys])
+
+    def getAccessKeys(self) -> List[int]:
+        return self.accessKeys
+
+    def setAccessKeys(self, keys: List) -> None:
+        self.accessKeys = list(keys)
+
+    def addAccessKey(self, key: int) -> None:
+        if key not in self.accessKeys:
+            self.accessKeys.append(key)
+            self.b_setAccessKeys(self.accessKeys)
+
+    def removeAccessKey(self, key: int) -> None:
+        if key in self.accessKeys:
+            self.accessKeys.remove(key)
+            self.b_setAccessKeys(self.accessKeys)
+
+    def clearAccessKeys(self) -> None:
+        self.accessKeys.clear()
+        self.b_setAccessKeys(self.accessKeys)
 
     def addPinkSlips(self, amountToAdd):
         pinkSlips = min(self.pinkSlips + amountToAdd, 255)

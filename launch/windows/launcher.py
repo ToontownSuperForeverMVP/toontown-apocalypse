@@ -112,7 +112,7 @@ def main():
     defaults = {
         "TTOFF_LOGIN_TOKEN": "player1",
         "TTOFF_GAME_SERVER": "127.0.0.1",
-        "DISTRICT_NAME": "Archipelago Avenue",
+        "DISTRICT_NAME": "Apocalypse Avenue",
         "ASTRON_IP": "127.0.0.1:7199"
     }
 
@@ -128,7 +128,7 @@ def main():
 
     # Prompt user
     safe_print("[System]", COLOR_SYSTEM, "========================================================")
-    safe_print("[System]", COLOR_SYSTEM, "          TOONTOWN ARCHIPELAGO UNIFIED LAUNCHER          ")
+    safe_print("[System]", COLOR_SYSTEM, "          TOONTOWN APOCALYPSE LAUNCHER          ")
     safe_print("[System]", COLOR_SYSTEM, "========================================================")
 
     try:
@@ -305,7 +305,7 @@ def main():
         safe_print("[System]", COLOR_SYSTEM, "Interrupted by user.")
     finally:
         cleanup()
-        safe_print("[System]", COLOR_SYSTEM, "Unified launcher finished.")
+        safe_print("[System]", COLOR_SYSTEM, "Toontown Apocalypse launcher finished.")
 
 if __name__ == "__main__":
     main()

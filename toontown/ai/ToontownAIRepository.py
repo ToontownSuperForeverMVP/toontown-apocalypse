@@ -60,6 +60,7 @@ from toontown.suit.SuitInvasionManagerAI import SuitInvasionManagerAI
 from toontown.toon import NPCToons
 from toontown.toonbase import ToontownGlobals, TTLocalizer
 from toontown.tutorial.TutorialManagerAI import TutorialManagerAI
+from toontown.action.tutorial.ActionTutorialManagerAI import ActionTutorialManagerAI
 from toontown.uberdog.DistributedInGameNewsMgrAI import DistributedInGameNewsMgrAI
 from toontown.uberdog.DistributedPartyManagerAI import DistributedPartyManagerAI
 
@@ -92,6 +93,7 @@ class ToontownAIRepository(ToontownInternalRepository):
         self.hoods = []
         self.buildingManagers = {}
         self.suitPlanners = {}
+        self.actionRunHandoffs = {}
         self.suitInvasionManager = None
         self.zoneAllocator = None
         self.minigameMgr = None
@@ -111,6 +113,7 @@ class ToontownAIRepository(ToontownInternalRepository):
         self.polarPlaceEffectMgr = None
         self.resistanceEmoteMgr = None
         self.tutorialManager = None
+        self.actionTutorialManager = None
         self.friendManager = None
         self.toontownTimeManager = None
         self.estateMgr = None
@@ -268,6 +271,10 @@ class ToontownAIRepository(ToontownInternalRepository):
         # Generate our tutorial manager...
         self.tutorialManager = TutorialManagerAI(self)
         self.tutorialManager.generateWithRequired(OTP_ZONE_ID_MANAGEMENT)
+
+        # Generate our guided real-time combat tutorial manager...
+        self.actionTutorialManager = ActionTutorialManagerAI(self)
+        self.actionTutorialManager.generateWithRequired(OTP_ZONE_ID_MANAGEMENT)
 
         # Generate our friend manager...
         self.friendManager = FriendManagerAI(self)
@@ -563,4 +570,3 @@ class ToontownAIRepository(ToontownInternalRepository):
             leaderboards.extend(foundLeaderBoards)
 
         return leaderboards
-

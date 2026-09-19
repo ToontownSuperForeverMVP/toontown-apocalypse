@@ -60,6 +60,7 @@ class Place(StateData.StateData, FriendsListManager.FriendsListManager):
         self._setZoneCompleteLocalCallbacks = None
         del self._tempFSM
         taskMgr.remove('goHomeFailed')
+        taskMgr.remove('retryTunnelIn')
         del self.walkDoneEvent
         self.walkStateData.unload()
         del self.walkStateData
@@ -229,8 +230,42 @@ class Place(StateData.StateData, FriendsListManager.FriendsListManager):
         self.walkStateData.fsm.request('walking')
         self.enablePeriodTimer()
         base.localAvatar.enterPlaceWalk()
+        self.accept(self.getLoadoutHotkey(), self.handleLoadoutHotkey)
+
+    # ------------------------------------------------------------------
+    # Gag Album hotkey (Toontown Apocalypse)
+    # ------------------------------------------------------------------
+    def getLoadoutHotkey(self):
+        return getattr(base.controls, 'LOADOUT_HOTKEY', 'l')
+
+    def handleLoadoutHotkey(self):
+        """Open the Gag Album from any place that supports the stopped state."""
+        if not hasattr(self, 'fsm') or not self.fsm.hasStateNamed('stopped'):
+            return
+        if self.fsm.getCurrentState().getName() != 'walk':
+            return
+        if getattr(self, 'loadoutPanel', None) is not None:
+            return
+        from toontown.action.ui.LoadoutPanel import LoadoutPanel
+        self.fsm.request('stopped')
+        self.loadoutDoneEvent = 'placeLoadoutDone'
+        self.acceptOnce(self.loadoutDoneEvent, self.__handleLoadoutDone)
+        self.loadoutPanel = LoadoutPanel(self.loadoutDoneEvent)
+
+    def __handleLoadoutDone(self):
+        self.__destroyLoadoutPanel()
+        if hasattr(self, 'fsm') and self.fsm.getCurrentState().getName() == 'stopped':
+            self.fsm.request('walk')
+
+    def __destroyLoadoutPanel(self):
+        panel = getattr(self, 'loadoutPanel', None)
+        if panel is not None:
+            self.ignore(getattr(self, 'loadoutDoneEvent', 'placeLoadoutDone'))
+            panel.destroy()
+            self.loadoutPanel = None
 
     def exitWalk(self):
+        self.ignore(self.getLoadoutHotkey())
         self.exitFLM()
         if base.cr.productName in ['DisneyOnline-US', 'ES'] and not base.cr.isPaid() and base.localAvatar.tutorialAck and not base.cr.whiteListChatEnabled:
             base.localAvatar.chatMgr.obscure(1, 0)
@@ -557,8 +592,9 @@ class Place(StateData.StateData, FriendsListManager.FriendsListManager):
 
     def enterDoorIn(self, requestStatus):
         NametagGlobals.setMasterArrowsOn(0)
-        door = base.cr.doId2do.get(requestStatus['doorDoId'])
-        door.readyToExit()
+        # The exit door stays closed until the player explicitly interacts
+        # with it. This removes the old arrival-side door track and keeps the
+        # toon in control of the crossing.
         base.localAvatar.obscureMoveFurnitureButton(1)
         base.localAvatar.startQuestMap()
 
@@ -586,6 +622,7 @@ class Place(StateData.StateData, FriendsListManager.FriendsListManager):
         if tunnelOrigin.isEmpty():
             # start a task to try again in the future
             taskMgr.doMethodLater(1.0, self.enterTunnelIn, 'retryTunnelIn', extraArgs=[requestStatus])
+            return
         self.accept('tunnelInMovieDone', self.__tunnelInMovieDone)
         base.localAvatar.reconsiderCheesyEffect()
         base.localAvatar.tunnelIn(tunnelOrigin)
@@ -956,6 +993,7 @@ class Place(StateData.StateData, FriendsListManager.FriendsListManager):
         messenger.send('stoppedAsleep')
 
     def exitStopped(self):
+        self.__destroyLoadoutPanel()
         Emote.globalEmote.releaseBody(base.localAvatar, 'exitStopped')
         base.localAvatar.setTeleportAvailable(0)
         self.ignore('teleportQuery')

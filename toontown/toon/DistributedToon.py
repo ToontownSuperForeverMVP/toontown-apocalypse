@@ -64,6 +64,7 @@ import random
 import copy
 
 from ..util.astron.AstronDict import AstronDict
+from toontown.action import ActionGlobals, ActionProgression
 
 
 if base.wantKarts:
@@ -204,6 +205,7 @@ class DistributedToon(DistributedPlayer.DistributedPlayer, Toon.Toon, Distribute
         self.instaKill = False
         self.hasPaidTaxes = False
         self.overheadLaffMeter = None
+        self.accessKeys: List[int] = []
         self.rewardHistory = []
         self.rewardTier = 0
         self.alreadyNotified = False
@@ -781,7 +783,10 @@ class DistributedToon(DistributedPlayer.DistributedPlayer, Toon.Toon, Distribute
     def died(self):
         messenger.send(self.uniqueName('died'))
         if self.isLocal():
-            self.sendUpdate('clientDied')  # Tell the server we saw our toon die for deathlink purposes
+            # ``clientDied`` is not a field in the ttap DistributedToon
+            # contract.  Sending it raises an AssertionError inside the
+            # client's readerPollTask, which silently stops receiving all
+            # later pressure, Cog movement, and attack updates.
             target_sz = ZoneUtil.getSafeZoneId(self.defaultZone)
             place = self.cr.playGame.getPlace()
             # if place and place.fsm:
@@ -1329,6 +1334,28 @@ class DistributedToon(DistributedPlayer.DistributedPlayer, Toon.Toon, Distribute
         self.trackArray = trackArray
         if self.inventory:
             self.inventory.updateGUI()
+        if self.isLocal():
+            messenger.send('action-track-access-changed', [list(trackArray)])
+
+    # ------------------------------------------------------------------
+    # Real-time combat loadout (Toontown Apocalypse)
+    # ------------------------------------------------------------------
+    def setEquippedTracks(self, tracks):
+        self.equippedTracks = ActionProgression.normalizeLoadout(tracks)
+        if self.isLocal():
+            messenger.send('action-loadout-changed', [list(self.equippedTracks)])
+
+    def getEquippedTracks(self):
+        return getattr(self, 'equippedTracks', [-1] * ActionGlobals.MAX_EQUIPPED_TRACKS)
+
+    def d_requestEquipTracks(self, tracks):
+        self.sendUpdate('requestEquipTracks', [ActionProgression.normalizeLoadout(tracks, self)])
+
+    def d_requestBuyGagTier(self, track):
+        self.sendUpdate('requestBuyGagTier', [int(track)])
+
+    def gagTierPurchaseResult(self, track, tier, success):
+        messenger.send('action-gag-tier-purchased', [track, tier, bool(success)])
 
     def getTrackAccess(self):
         return self.trackArray
@@ -2205,6 +2232,12 @@ class DistributedToon(DistributedPlayer.DistributedPlayer, Toon.Toon, Distribute
     def setPinkSlips(self, pinkSlips):
         self.pinkSlips = pinkSlips
 
+    def getAccessKeys(self) -> List[int]:
+        return self.accessKeys
+
+    def setAccessKeys(self, keys: List) -> None:
+        self.accessKeys = list(keys)
+
     def setAccess(self, access):
         self.setGameAccess(access)
         self.setDisplayName(self.getName())
@@ -2819,5 +2852,3 @@ class DistributedToon(DistributedPlayer.DistributedPlayer, Toon.Toon, Distribute
             'where': 'cogHQBossBattle',
             'how': 'movie'
         }])
-
-

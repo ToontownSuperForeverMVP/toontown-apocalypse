@@ -1,4 +1,5 @@
 from direct.showbase.DirectObject import DirectObject
+from direct.gui.DirectGuiGlobals import PGButton
 from panda3d.core import *
 
 from . import NametagGlobals

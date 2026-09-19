@@ -1,5 +1,5 @@
 @echo off
-title Toontown Archipelago - UberDOG Server
+title Toontown Apocalypse - UberDOG Server
 set SERVICE_TO_RUN=UD
 cd game
 

@@ -3,12 +3,18 @@ from otp.otpbase import OTPGlobals
 from direct.fsm import ClassicFSM
 from direct.fsm import State
 from direct.distributed import DistributedNodeAI
+from direct.distributed import DistributedSmoothNodeAI
 from direct.task import Task
 
-class DistributedAvatarAI(DistributedNodeAI.DistributedNodeAI):
+class DistributedAvatarAI(DistributedSmoothNodeAI.DistributedSmoothNodeAI):
+    # The dclass already inherits DistributedSmoothNode and marks the setSm*
+    # fields airecv, so the AI receives every avatar position update.  Deriving
+    # from DistributedSmoothNodeAI makes the AI apply them to the NodePath
+    # instead of silently discarding them; the real-time street combat
+    # director depends on toon.getPos() being meaningful on the AI.
 
     def __init__(self, air):
-        DistributedNodeAI.DistributedNodeAI.__init__(self, air)
+        DistributedSmoothNodeAI.DistributedSmoothNodeAI.__init__(self, air)
         self.hp = 0
         self.maxHp = 0
 

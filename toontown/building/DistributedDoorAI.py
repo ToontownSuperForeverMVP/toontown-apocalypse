@@ -7,6 +7,7 @@ from direct.distributed import DistributedObjectAI
 from direct.fsm import State
 
 from toontown.building import FADoorCodes
+from toontown.building import DoorTypes
 
 
 class DistributedDoorAI(DistributedObjectAI.DistributedObjectAI):
@@ -113,7 +114,11 @@ class DistributedDoorAI(DistributedObjectAI.DistributedObjectAI):
             return False
 
         lockedBy = self.isLockedDoor()
-        return lockedBy in av.getAccessKeys()
+        get_access_keys = getattr(av, 'getAccessKeys', None)
+        if get_access_keys is None:
+            return False
+
+        return lockedBy in get_access_keys()
 
     def requestEnter(self):
         avatarID = self.air.getAvatarIdFromSender()
@@ -130,6 +135,21 @@ class DistributedDoorAI(DistributedObjectAI.DistributedObjectAI):
             self.avatarsWhoAreEntering[avatarID] = 1
             self.sendUpdate('avatarEnter', [avatarID])
         self.openDoor(self.fsm)
+
+    def requestOpen(self):
+        avatarID = self.air.getAvatarIdFromSender()
+        if not self.avHasAccess(avatarID):
+            return self.sendReject(avatarID, self.isLockedDoor())
+        self.openDoor(self.fsm)
+
+    def requestClose(self):
+        avatarID = self.air.getAvatarIdFromSender()
+        self.avatarsWhoAreEntering.pop(avatarID, None)
+        doorFsm = self.exitDoorFSM if self.doorType in (
+            DoorTypes.INT_STANDARD, DoorTypes.INT_HQ, DoorTypes.INT_COGHQ,
+            DoorTypes.INT_KS, DoorTypes.INT_HOUSE) else self.fsm
+        if doorFsm.getCurrentState().getName() == 'open':
+            doorFsm.request('closing')
 
     def openDoor(self, doorFsm):
         stateName = doorFsm.getCurrentState().getName()
@@ -210,7 +230,6 @@ class DistributedDoorAI(DistributedObjectAI.DistributedObjectAI):
     def enterOpen(self):
         self.d_setState('open')
         self.avatarsWhoAreEntering = {}
-        self.doLaterTask = taskMgr.doMethodLater(1, self.openTask, self.uniqueName('door_open-timer'))
 
     def exitOpen(self):
         if self.doLaterTask:
@@ -268,7 +287,6 @@ class DistributedDoorAI(DistributedObjectAI.DistributedObjectAI):
     def exitDoorEnterOpen(self):
         self.d_setExitDoorState('open')
         self.avatarsWhoAreExiting = {}
-        self.exitDoorDoLaterTask = taskMgr.doMethodLater(1, self.exitDoorOpenTask, self.uniqueName('exit_door_open-timer'))
 
     def exitDoorExitOpen(self):
         if self.exitDoorDoLaterTask:

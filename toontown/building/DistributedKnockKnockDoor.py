@@ -122,9 +122,10 @@ class DistributedKnockKnockDoor(DistributedAnimatedProp.DistributedAnimatedProp)
         zone = place.getZoneId()
         streetId = ZoneUtil.getBranchZone(zone)
         pgId = ZoneUtil.getCanonicalHoodId(base.localAvatar.getZoneId())
-        if base.localAvatar.slotData.get("joke_books", True) and FADoorCodes.ZONE_TO_JOKE_CODE[pgId] in base.localAvatar.getAccessKeys():
+        slotData = getattr(base.localAvatar, 'slotData', {})
+        if slotData.get("joke_books", True) and FADoorCodes.ZONE_TO_JOKE_CODE[pgId] in base.localAvatar.getAccessKeys():
             self.sendUpdate('knockKnockCheck', [streetId])
-        if not base.localAvatar.slotData.get("joke_books", True):
+        if not slotData.get("joke_books", True):
             self.sendUpdate('knockKnockCheck', [streetId])
         
     def cleanupTrack(self):

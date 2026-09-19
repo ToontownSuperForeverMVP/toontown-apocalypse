@@ -26,21 +26,22 @@ class Experience:
         return self.experience
 
     def getExperienceCapForTrack(self, track):
-        trackExperienceCap = ToontownBattleGlobals.MaxSkill
+        """Mastery XP cap for a track under the three-tier gag model.
 
-        # If we have an access level below the # of levels of gags, determine the max xp we can obtain
-        # If none of these checks pass, we are allowed to go to 999,999 exp
-        highestLevelGagAllowed = self.owner.getTrackAccessLevel(track)
-        highestLevelGagAllowed = max(0, highestLevelGagAllowed)  # Allow negative to just mean 0
-        if highestLevelGagAllowed <= ToontownBattleGlobals.LAST_REGULAR_GAG_LEVEL:
-            trackExperienceCap = ToontownBattleGlobals.Levels[track][highestLevelGagAllowed] - 1
-        # Do we have access to the max gag level but not overflowing?
-        elif highestLevelGagAllowed == ToontownBattleGlobals.LAST_REGULAR_GAG_LEVEL+1:
-            trackExperienceCap = ToontownBattleGlobals.regMaxSkill - 1
+        ``trackAccess`` now stores the owned tier (0 = undiscovered, 1-3).
+        Mastery keeps accumulating past the purchase thresholds so a Toon who
+        cannot afford the next tier yet is never punished for playing; the
+        only hard cap is the mastery ceiling that feeds the damage bonus.
+        """
+        from toontown.action import ActionGlobals
 
-        # Make sure it is not negative
-        trackExperienceCap = max(0, trackExperienceCap)
-        return trackExperienceCap
+        owner = self.owner
+        if owner is None:
+            return ActionGlobals.MAX_TRACK_XP
+        tier = ActionGlobals.getTrackTierFromAccess(owner.getTrackAccessLevel(track))
+        if tier <= 0:
+            return 0
+        return ActionGlobals.MAX_TRACK_XP
 
     def getAllowedGagLevels(self, track):
 

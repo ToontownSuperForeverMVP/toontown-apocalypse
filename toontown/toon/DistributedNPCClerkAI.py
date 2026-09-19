@@ -2,6 +2,7 @@ from otp.ai.AIBaseGlobal import *
 from direct.task.Task import Task
 from panda3d.core import *
 from .DistributedNPCToonBaseAI import *
+from toontown.hood import ZoneUtil
 
 class DistributedNPCClerkAI(DistributedNPCToonBaseAI):
 
@@ -21,6 +22,11 @@ class DistributedNPCClerkAI(DistributedNPCToonBaseAI):
         if av is None:
             self.notify.warning('toon isnt there! toon: %s' % avId)
             return
+
+        # Restocking heals the Toon and runs a purchase FSM on the client.
+        # Make the interaction a real combat-safe zone on the AI too; otherwise
+        # an already-telegraphed Cog attack can land while the clerk is healing.
+        self.__setActionSafe(avId, True)
 
         self.acceptOnce(self.air.getAvatarExitEvent(avId), self.__handleUnexpectedExit, extraArgs=[avId])
 
@@ -54,6 +60,7 @@ class DistributedNPCClerkAI(DistributedNPCToonBaseAI):
 
     def sendClearMovie(self, avId=0, task=None):
         self.ignore(self.air.getAvatarExitEvent(avId))
+        self.__setActionSafe(avId, False)
         self.sendUpdate('setMovie', [NPCToons.PURCHASE_MOVIE_CLEAR,
          self.npcId,
          avId,
@@ -67,6 +74,18 @@ class DistributedNPCClerkAI(DistributedNPCToonBaseAI):
          ClockDelta.globalClockDelta.getRealNetworkTime()])
         self.sendClearMovie(avId, None)
         return
+
+    def __setActionSafe(self, avId, safe):
+        av = self.air.doId2do.get(avId)
+        if av is None:
+            return
+        av.actionSafe = bool(safe)
+        streetId = ZoneUtil.getBranchZone(getattr(av, 'zoneId', 0))
+        planner = getattr(self.air, 'suitPlanners', {}).get(streetId)
+        if planner is not None:
+            director = getattr(planner, 'actionDirector', None)
+            if director is not None:
+                director.setToonSafe(avId, safe)
 
     def setInventory(self, blob, newMoney, done, laff):
         avId = self.air.getAvatarIdFromSender()

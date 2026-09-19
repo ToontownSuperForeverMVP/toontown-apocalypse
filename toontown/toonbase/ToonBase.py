@@ -208,7 +208,7 @@ class ToonBase(OTPBase.OTPBase):
         self.randomMusic = self.settings.get("random-music")
         self.discord = DiscordRPC()
         self.discord.launching()
-        self.ap_version_text = OnscreenText(text="Toontown SuperCFO Testing", parent=self.a2dBottomLeft, pos=(.3, .05), mayChange=False, sort=-100, scale=.04, fg=(1, 1, 1, .3), shadow=(0, 0, 0, .3), align=TextNode.ALeft)
+        self.ap_version_text = OnscreenText(text="Toontown Apocalypse", parent=self.a2dBottomLeft, pos=(.3, .05), mayChange=False, sort=-100, scale=.04, fg=(1, 1, 1, .3), shadow=(0, 0, 0, .3), align=TextNode.ALeft)
 
         self.enableHotkeys()
 
@@ -234,7 +234,7 @@ class ToonBase(OTPBase.OTPBase):
         searchPath = DSearchPath()
         searchPath.appendDirectory(Filename('/phase_3/models/gui'))
 
-        for filename in ['toonmono.cur', 'icon.ico']:
+        for filename in ['toonmono.cur', 'tta-icon.ico']:
             p3filename = Filename(filename)
             found = vfs.resolveFilename(p3filename, searchPath)
             if not found:
@@ -245,7 +245,7 @@ class ToonBase(OTPBase.OTPBase):
 
         wp = WindowProperties()
         wp.setCursorFilename(Filename.fromOsSpecific(os.path.join(tempdir, 'toonmono.cur')))
-        wp.setIconFilename(Filename.fromOsSpecific(os.path.join(tempdir, 'icon.ico')))
+        wp.setIconFilename(Filename.fromOsSpecific(os.path.join(tempdir, 'tta-icon.ico')))
         self.win.requestProperties(wp)
 
     def windowEvent(self, win):
@@ -480,7 +480,7 @@ class ToonBase(OTPBase.OTPBase):
         print('ignoring InputState-forward')
 
     def exitShow(self, errorCode = None):
-        self.notify.info('Exiting Toontown: errorCode = %s' % errorCode)
+        self.notify.info('Exiting Toontown Apocalypse: errorCode = %s' % errorCode)
         if errorCode:
             launcher.setPandaErrorCode(errorCode)
         else:
@@ -856,4 +856,3 @@ class ToonBase(OTPBase.OTPBase):
             self.notify.warning("No json data found for music, skipping.")
         # messenger.send("audioRefreshDialogDone")
         self.notify.debug("Audio devices refreshed.")
-

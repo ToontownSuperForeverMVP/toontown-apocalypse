@@ -41,7 +41,35 @@ class DistributedSuitAI(DistributedSuitBaseAI.DistributedSuitBaseAI):
         self.takeoverIsCogdo = False
         self.buildingDestination = None
         self.buildingDestinationIsCogdo = False
+        # Set once the real-time combat controller takes the Cog off its
+        # deterministic DNA path.
+        self.actionControlled = False
         return
+
+    # ------------------------------------------------------------------
+    # Real-time combat (Toontown Apocalypse)
+    # ------------------------------------------------------------------
+    def getCurrentPathPos(self):
+        """Where the deterministic client-side path animation has this Cog now."""
+        legList = getattr(self, 'legList', None)
+        if legList is None or self.pathState != 1 or not hasattr(self, 'pathStartTime'):
+            return None
+        try:
+            elapsed = globalClock.getFrameTime() - self.pathStartTime
+            legIndex = legList.getLegIndexAtTime(elapsed, self.currentLeg)
+            leg = legList.getLeg(legIndex)
+            return leg.getPosAtTime(elapsed - leg.getStartTime())
+        except Exception:
+            return None
+
+    def beginActionControl(self):
+        """Hand movement authority from the DNA path to the combat controller."""
+        if self.actionControlled:
+            return
+        self.actionControlled = True
+        # Stops the AI leg timer (no building takeover / removal at the end
+        # of the path) and tells clients to stop advancing along the legs.
+        self.b_setPathState(0)
 
     def stopTasks(self):
         taskMgr.remove(self.taskName('flyAwayNow'))
@@ -58,35 +86,12 @@ class DistributedSuitAI(DistributedSuitBaseAI.DistributedSuitBaseAI):
         return self.legList.isPointInRange(point, elapsed - self.sp.PATH_COLLISION_BUFFER, elapsed + self.sp.PATH_COLLISION_BUFFER)
 
     def requestBattle(self, x, y, z, h, p, r):
+        # Street Cogs fight in real time now; the turn-based street battle
+        # was removed.  Any stale client request is simply denied.
         toonId = self.air.getAvatarIdFromSender()
         if self.air.doId2do.get(toonId) == None:
             return
-        toon = self.air.doId2do.get(toonId)
-        if self.pathState == 3:
-            pass
-        elif self.pathState != 1:
-            if self.notify.getDebug():
-                self.notify.debug('requestBattle() - suit %d not on path' % self.getDoId())
-            if self.pathState == 2 or self.pathState == 4:
-                self.b_setBrushOff(SuitDialog.getBrushOffIndex(self.getStyleName()))
-            self.d_denyBattle(toonId)
-            return
-        elif self.legType != SuitLeg.TWalk:
-            if self.notify.getDebug():
-                self.notify.debug('requestBattle() - suit %d not in Bellicose' % self.getDoId())
-            self.b_setBrushOff(SuitDialog.getBrushOffIndex(self.getStyleName()))
-            self.d_denyBattle(toonId)
-            return
-        self.confrontPos = Point3(x, y, z)
-        self.confrontHpr = Vec3(h, p, r)
-        if toon.hp > 0 and self.sp.requestBattle(self.zoneId, self, toonId):
-            if self.notify.getDebug():
-                self.notify.debug('Suit %d requesting battle in zone %d' % (self.getDoId(), self.zoneId))
-        else:
-            if self.notify.getDebug():
-                self.notify.debug('requestBattle from suit %d - denied by battle manager' % self.getDoId())
-            self.b_setBrushOff(SuitDialog.getBrushOffIndex(self.getStyleName()))
-            self.d_denyBattle(toonId)
+        self.d_denyBattle(toonId)
         return
 
     def getConfrontPosHpr(self):

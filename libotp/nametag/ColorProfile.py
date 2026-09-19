@@ -1,5 +1,5 @@
 from panda3d.core import Vec4
-from direct.gui.DirectGuiGlobals import *
+from direct.gui.DirectGuiGlobals import PGButton
 
 class ColorProfile:
     def __init__(self, clickable=Vec4(0, 0, 0, 1), hover=Vec4(0, 0, 0, 1), pressed=Vec4(0, 0, 0, 1), disabled=Vec4(0, 0, 0, 1)):

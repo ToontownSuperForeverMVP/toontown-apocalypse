@@ -4,7 +4,7 @@ from toontown.launcher.TTOffLauncherBase import TTOffLauncherBase
 from toontown.toonbase import TTLocalizer
 
 class TTOffQuickLauncher(TTOffLauncherBase):
-    GameName = 'Toontown Online'
+    GameName = 'Toontown Apocalypse'
     ForegroundSleepTime = 0.001
     Localizer = TTLocalizer
 
@@ -35,7 +35,7 @@ class TTOffQuickLauncher(TTOffLauncherBase):
         return self.getValue('TTOFF_GAME_SERVER', '')
 
     def getLogFileName(self):
-        return 'archipelago'
+        return 'toontown-apocalypse'
 
     def parseWebAcctParams(self):
         # these aren't ever used, as self.useTTOffSpecificLogin should

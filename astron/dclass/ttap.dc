@@ -89,8 +89,10 @@ from toontown.shtiker import PurchaseManager/AI
 from toontown.shtiker import NewbiePurchaseManager/AI
 from toontown.safezone import SafeZoneManager/AI
 from toontown.tutorial import TutorialManager/AI
+from toontown.action.tutorial import ActionTutorialManager/AI
 from toontown.catalog import CatalogManager/AI
 from toontown.safezone import DistributedTreasure/AI
+from toontown.action import DistributedTrackCache/AI
 from toontown.safezone import DistributedDDTreasure/AI
 from toontown.safezone import DistributedDGTreasure/AI
 from toontown.safezone import DistributedDLTreasure/AI
@@ -976,6 +978,10 @@ dclass DistributedToon : DistributedPlayer {
   setTrackAccess(uint16[] = [0, 0, 0, 0, 0, 0, 0]) required broadcast ownrecv db;
   setTrackProgress(int8 = -1, uint32 = 0) required ownrecv db;
   setTrackBonusLevel(int8[] = [-1, -1, -1, -1, -1, -1, -1]) required broadcast ownrecv db;
+  setEquippedTracks(int8[] = [-1, -1, -1]) required broadcast ownrecv db;
+  requestEquipTracks(int8[]) airecv ownsend;
+  requestBuyGagTier(uint8 track) airecv ownsend;
+  gagTierPurchaseResult(uint8 track, uint8 tier, uint8 success) ownrecv;
   setInventory(blob = [0 * 7, 0 * 7, 0 * 7, 0 * 7, 1, 0 * 6, 1, 0 * 6, 0 * 7]) required ownrecv db;
   setMaxNPCFriends(uint16 = 16) required ownrecv db;
   setNPCFriendsDict(Friend[] = []) required ownrecv db;
@@ -1159,6 +1165,7 @@ dclass DistributedToon : DistributedPlayer {
   setBaseGagSkillMultiplier(uint16=1) required ownrecv broadcast db;
   setDamageMultiplier(uint16=100) required ownrecv broadcast db;
   setOverflowMod(uint16=100) required ownrecv broadcast db;
+  setAccessKeys(uint16[] = []) required ownrecv broadcast db;
 
 };
 
@@ -1192,15 +1199,36 @@ dclass DistributedTrolley : DistributedObject {
   setMinigameZone(uint32, uint16);
 };
 
+struct ActionObjective {
+  uint8 kind;
+  uint8 param;
+  uint16 target;
+  uint16 progress;
+  uint16 beans;
+};
+
 dclass DistributedSuitPlanner : DistributedObject {
   setZoneId(uint32) required broadcast ram;
   suitListQuery() airecv clsend;
   suitListResponse(uint8[]);
   buildingListQuery() airecv clsend;
   buildingListResponse(uint8[]);
+  // Real-time street runs (Toontown Apocalypse)
+  requestStreetRun(uint8 tier) airecv clsend;
+  leaveStreetRun() airecv clsend;
+  setActionTier(uint8 tier) broadcast ram;
+  setActionPressure(uint16 pressure, uint8 stage) broadcast ram;
+  setActionObjectives(ActionObjective[]) broadcast ram;
+  actionObjectiveComplete(uint8 index, uint16 beans, uint8 track, uint16 xp) broadcast;
+  actionAnnounce(uint8 kind, uint32 avId, uint16 value) broadcast;
+  requestActionTrap(uint8 level, int16/10 x, int16/10 y, int16/10 z) airecv clsend;
+  actionTrapPlaced(uint16 trapId, uint32 avId, uint8 level, int16/10 x, int16/10 y, int16/10 z) broadcast;
+  actionTrapTriggered(uint16 trapId, uint32 suitId) broadcast;
+  requestActionToonUp(uint8 level) airecv clsend;
+  actionToonUp(uint32 avId, uint8 level, uint16 amount) broadcast;
 };
 
-dclass DistributedSuitBase : DistributedObject {
+dclass DistributedSuitBase : DistributedSmoothNode {
   denyBattle();
   setDNAString(blob) required broadcast ram;
   setLevelDist(int16) required broadcast ram;
@@ -1209,6 +1237,14 @@ dclass DistributedSuitBase : DistributedObject {
   setSkeleRevives(uint8) required broadcast ram;
   setImmuneStatus(uint8) required broadcast ram;
   setHP(int32) required broadcast ram;
+  requestFreeGagHit(uint8, uint8) airecv clsend;
+  freeGagHit(uint32, uint8, uint8, int16) broadcast;
+  // Real-time combat (Toontown Apocalypse)
+  setActionState(uint8 state) broadcast ram;
+  actionAttack(uint8 attackId, uint32 targetId, int16/10 x, int16/10 y, int16/10 z, uint16 windupMs, uint8 mutation) broadcast;
+  actionAttackResolved(uint8 attackId, uint32 toonId, int16 damage) broadcast;
+  actionStatus(uint8 status, uint16 durationMs) broadcast;
+  actionDefeated(uint32 toonId, uint16 beans, uint8 track, uint16 xp, uint8 elite) broadcast;
 };
 
 dclass DistributedSuit : DistributedSuitBase {
@@ -2129,6 +2165,16 @@ dclass TutorialManager : DistributedObject {
   toonArrived() airecv clsend;
 };
 
+// Guided real-time combat onboarding shown once after a Toon is created.
+dclass ActionTutorialManager : DistributedObject {
+  requestAdvance() airecv clsend;
+  requestSkip() airecv clsend;
+  setTutorialStep(uint8 step, uint8 total) broadcast ram;
+  setTutorialValue(uint16 value) broadcast;
+  tutorialStepComplete(uint8 step, uint16 beans) broadcast;
+  tutorialFinished(uint8 success) broadcast;
+};
+
 dclass CatalogManager : DistributedObject {
   startCatalog() airecv clsend;
 };
@@ -2175,6 +2221,10 @@ dclass DistributedTagTreasure : DistributedTreasure {
 };
 
 dclass DistributedArchiTreasure : DistributedTreasure {
+};
+
+dclass DistributedTrackCache : DistributedTreasure {
+  setTrackReward(int8 track, uint16 beans);
 };
 
 dclass DistributedCashbotBossTreasure : DistributedTreasure {
@@ -2226,6 +2276,7 @@ dclass DistributedTrophyMgr : DistributedObject {
 dclass DistributedBuilding : DistributedObject {
   setBlock(uint16, uint32) required broadcast ram;
   setSuitData(int8, int8, int8) required broadcast ram;
+  setActionBuilding(uint8) required broadcast ram;
   setVictorList(uint32[]) broadcast ram;
   setState(string, int16) broadcast ram;
   setVictorReady() airecv clsend;
@@ -2255,8 +2306,10 @@ dclass DistributedSuitInterior : DistributedObject {
   setExtZoneId(uint32) required broadcast ram;
   setDistBldgDoId(uint32) required broadcast ram;
   setNumFloors(int8) required broadcast ram;
+  setActionBuilding(uint8) required broadcast ram;
   setToons(uint32[], uint16) broadcast ram;
   setSuits(uint32[], uint32[], uint16[]) broadcast ram;
+  actionBuildingReturn() broadcast;
   setState(string, int16) required broadcast ram;
   setAvatarJoined() airecv clsend;
   elevatorDone() airecv clsend;
@@ -2436,6 +2489,8 @@ dclass DistributedDoor : DistributedObject {
   setDoorType(uint8) required broadcast ram;
   setDoorIndex(uint8) required broadcast ram;
   setOtherZoneIdAndDoId(uint32, uint32);
+  requestOpen() airecv clsend;
+  requestClose() airecv clsend;
   requestEnter() airecv clsend;
   requestExit() airecv clsend;
   rejectEnter(int8);

@@ -33,7 +33,7 @@ logErr = LogAndOutput(sys.__stderr__, log)
 sys.stdout = logOut
 sys.stderr = logErr
 
-print('\n\nStarting Toontown: Archipelago...')
+print('\n\nStarting Toontown Apocalypse...')
 
 print('Current time: ' + time.asctime(time.localtime(time.time())) + ' ' + time.tzname[0])
 print('sys.path = ', sys.path)
@@ -45,7 +45,7 @@ from toontown.launcher.TTOffLauncherBase import TTOffLauncherBase
 from toontown.toonbase import TTLocalizer
 
 class TTOffLauncher(TTOffLauncherBase):
-    GameName = 'Toontown Online'
+    GameName = 'Toontown Apocalypse'
     LauncherPhases = [3, 3.5, 4, 5, 5.5, 6, 7, 8, 9, 10, 11, 12, 13]
     TmpOverallMap = [0.25, 0.15, 0.12, 0.17, 0.08, 0.07, 0.05, 0.05, 0.017,
                      0.011, 0.01, 0.012, 0.01]
@@ -83,7 +83,7 @@ class TTOffLauncher(TTOffLauncherBase):
         return self.gameServer
 
     def getLogFileName(self):
-        return 'archipelago'
+        return 'toontown-apocalypse'
 
     def parseWebAcctParams(self):
         self.secretNeedsParentPasswordKey = 0

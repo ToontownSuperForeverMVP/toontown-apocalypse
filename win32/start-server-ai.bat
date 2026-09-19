@@ -1,5 +1,5 @@
 @echo off
-title Super CFO: AI Launcher
+title Toontown Apocalypse: AI Launcher
 set /P PPYTHON_PATH=<PPYTHON_PATH
 set SERVICE_TO_RUN=AI
 cd ..\

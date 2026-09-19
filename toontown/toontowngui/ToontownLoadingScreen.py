@@ -10,9 +10,17 @@ class ToontownLoadingScreen:
         self.__expectedCount = 0
         self.__count = 0
         self.gui = loader.loadModel('phase_3/models/gui/progress-background')
+        # The stock progress background contains the old Toontown logo. Keep
+        # its background and progress bar, but let the Apocalypse logo own the
+        # loading screen branding.
+        self.gui.find('**/logo').hide()
         self.banner = loader.loadModel('phase_3/models/gui/toon_council').find('**/scroll')
         self.banner.reparentTo(self.gui)
         self.banner.setScale(0.4, 0.4, 0.4)
+        self.logo = DirectFrame(guiId='ToontownApocalypseLogo', parent=self.gui, relief=None,
+                                image='phase_3/maps/tta-logo.png', image_scale=(0.52, 1.0, 0.39),
+                                pos=(0, 0, 0.49), state=DGG.DISABLED)
+        self.logo.setTransparency(TransparencyAttrib.MAlpha)
         self.tip = DirectLabel(guiId='ToontownLoadingScreenTip', parent=self.banner, relief=None, text='', text_scale=TTLocalizer.TLStip, textMayChange=1, pos=(-1.2, 0.0, 0.1), text_fg=(0.4, 0.3, 0.2, 1), text_wordwrap=13, text_align=TextNode.ALeft)
         self.title = DirectLabel(guiId='ToontownLoadingScreenTitle', parent=self.gui, relief=None, pos=(0, 0, -0.77), text='', textMayChange=1, text_scale=0.10, text_shadow=(0, 0, 0, 1), text_fg=(1, 1, 1, 1), text_align=TextNode.ACenter)
         self.waitBar = DirectWaitBar(guiId='ToontownLoadingScreenWaitBar', parent=self.gui, frameSize=(-1.06,
@@ -25,6 +33,7 @@ class ToontownLoadingScreen:
         self.tip.destroy()
         self.title.destroy()
         self.waitBar.destroy()
+        self.logo.destroy()
         self.banner.removeNode()
         self.gui.removeNode()
 

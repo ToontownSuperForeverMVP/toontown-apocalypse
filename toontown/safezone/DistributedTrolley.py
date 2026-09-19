@@ -20,6 +20,10 @@ class DistributedTrolley(DistributedObject.DistributedObject):
         DistributedObject.DistributedObject.__init__(self, cr)
         self.localToonOnBoard = 0
         self.trolleyCountdownTime = base.config.GetFloat('trolley-countdown-time', TROLLEY_COUNTDOWN_TIME)
+        self.clock = None
+        self.clockNode = None
+        self.hint = None
+        self.hintNode = None
         self.fsm = ClassicFSM.ClassicFSM('DistributedTrolley', [State.State('off', self.enterOff, self.exitOff, ['entering',
           'waitEmpty',
           'waitCountdown',
@@ -121,6 +125,8 @@ class DistributedTrolley(DistributedObject.DistributedObject):
         self.trolleyExitTrack = Parallel(trolleyExitPos, trolleyExitBellInterval, trolleyExitAwayInterval, trolleyExitAnimateInterval, name=self.uniqueName('trolleyExit'))
 
     def disable(self):
+        taskMgr.remove('trolleyTimerTask')
+        self.ignoreElevatorHotkey()
         DistributedObject.DistributedObject.disable(self)
         self.fsm.request('off')
         self.clearToonTracks()
@@ -336,6 +342,8 @@ class DistributedTrolley(DistributedObject.DistributedObject):
             self.countdown(self.trolleyCountdownTime - ts)
 
     def timerTask(self, task):
+        if not self.clockNode:
+            return Task.done
         countdownTime = int(task.duration - task.time)
         timeStr = str(countdownTime)
         if self.clockNode.getText() != timeStr:
@@ -359,12 +367,14 @@ class DistributedTrolley(DistributedObject.DistributedObject):
         self.__disableCollisions()
         self.ignore('trolleyExitButton')
         taskMgr.remove('trolleyTimerTask')
-        self.clock.removeNode()
-        self.hint.removeNode()
-        del self.hint
-        del self.hintNode
-        del self.clock
-        del self.clockNode
+        if self.clock:
+            self.clock.removeNode()
+        if self.hint:
+            self.hint.removeNode()
+        self.hint = None
+        self.hintNode = None
+        self.clock = None
+        self.clockNode = None
 
     def enterLeaving(self, ts):
         self.trolleyExitTrack.start(ts)
@@ -426,15 +436,19 @@ class DistributedTrolley(DistributedObject.DistributedObject):
                 self.clearToonTrack(key)
 
     def startTrolley(self):
+        if not getattr(self, 'cr', None):
+            return
         self.countdown(0)
         self.sendUpdate('countdown', [0])
 
     def acceptElevatorHotkey(self):
-        if hasattr(self, 'hint'):
+        # ``hint`` is only built by the boarding state, so it can still be None
+        # when a trolley is disabled early.
+        if getattr(self, 'hint', None) is not None:
             self.hint.show()
         self.accept(ToontownGlobals.ElevatorHotkeyOn, self.startTrolley)
 
     def ignoreElevatorHotkey(self):
-        if hasattr(self, 'hint'):
+        if getattr(self, 'hint', None) is not None:
             self.hint.hide()
         self.ignore(ToontownGlobals.ElevatorHotkeyOn)

@@ -584,53 +584,37 @@ class LocalToon(DistributedToon.DistributedToon, LocalAvatar.LocalAvatar):
         self.b_setTunnelOut(self.tunnelX * 0.95, tunnelY, tunnelOrigin)
 
     def handleTunnelIn(self, startTime, endX, x, y, z, h):
-        self.notify.debug('LocalToon.handleTunnelIn')
+        self.notify.debug('LocalToon.handleTunnelIn (source movement)')
         tunnelOrigin = render.attachNewNode('tunnelOrigin')
         tunnelOrigin.setPosHpr(x, y, z, h, 0, 0)
-        self.b_setAnimState('run', self.animMultiplier)
-        self.stopLookAround()
+        self.stopSmooth()
+        self.stopSound()
         self.reparentTo(render)
-        self.runSound()
-        camera.reparentTo(render)
-        camera.setPosHpr(tunnelOrigin, 0, 20, 12, 180, -20, 0)
-        base.transitions.irisIn(0.4)
-        toonTrack = self.getTunnelInToonTrack(endX, tunnelOrigin)
-
-        def cleanup(self = self, tunnelOrigin = tunnelOrigin):
-            self.stopSound()
-            tunnelOrigin.removeNode()
-            messenger.send('tunnelInMovieDone')
-
-        self.tunnelTrack = Sequence(toonTrack, Func(cleanup))
-        self.tunnelTrack.start(globalClock.getFrameTime() - startTime)
+        # Spawn inside the tunnel, not on the trigger sphere at the street
+        # mouth. The player resumes control immediately after the load.
+        self.setPos(tunnelOrigin, endX, 6.0, 0.1)
+        self.setHpr(tunnelOrigin, 0, 0, 0)
+        tunnelOrigin.removeNode()
+        self.startSmooth()
+        messenger.send('tunnelInMovieDone')
 
     def handleTunnelOut(self, startTime, startX, startY, x, y, z, h):
-        self.notify.debug('LocalToon.handleTunnelOut')
+        self.notify.debug('LocalToon.handleTunnelOut (source movement)')
         tunnelOrigin = render.attachNewNode('tunnelOrigin')
         tunnelOrigin.setPosHpr(x, y, z, h, 0, 0)
-        self.b_setAnimState('run', self.animMultiplier)
-        self.runSound()
-        self.stopLookAround()
-        tracks = Parallel()
-        camera.wrtReparentTo(render)
-        startPos = camera.getPos(tunnelOrigin)
-        startHpr = camera.getHpr(tunnelOrigin)
-        camLerpDur = 1.0
-        reducedCamH = fitDestAngle2Src(startHpr[0], 180)
-        tracks.append(LerpPosHprInterval(camera, camLerpDur, pos=Point3(0, 20, 12), hpr=Point3(reducedCamH, -20, 0), startPos=startPos, startHpr=startHpr, other=tunnelOrigin, blendType='easeInOut', name='tunnelOutLerpCamPos'))
-        toonTrack = self.getTunnelOutToonTrack(startX, startY, tunnelOrigin)
-        tracks.append(toonTrack)
-        irisDur = 0.4
-        tracks.append(Sequence(Wait(toonTrack.getDuration() - (irisDur + 0.1)), Func(base.transitions.irisOut, irisDur)))
-
-        def cleanup(self = self, tunnelOrigin = tunnelOrigin):
-            self.stopSound()
-            self.detachNode()
-            tunnelOrigin.removeNode()
-            messenger.send('tunnelOutMovieDone')
-
-        self.tunnelTrack = Sequence(tracks, Func(cleanup))
-        self.tunnelTrack.start(globalClock.getFrameTime() - startTime)
+        self.stopSmooth()
+        self.stopSound()
+        self.reparentTo(render)
+        # Preserve the tunnel side of the trigger. If the network start point
+        # is too close to the mouth, push it back by a fixed amount.
+        spawnY = startY
+        if abs(spawnY) < 6.0:
+            spawnY = -6.0 if startY <= 0.0 else 6.0
+        self.setPos(tunnelOrigin, startX, spawnY, 0.1)
+        self.setHpr(tunnelOrigin, 0, 0, 0)
+        tunnelOrigin.removeNode()
+        self.startSmooth()
+        messenger.send('tunnelOutMovieDone')
 
     def getPieBubble(self):
         if self.__pieBubble == None:
@@ -1249,7 +1233,9 @@ class LocalToon(DistributedToon.DistributedToon, LocalAvatar.LocalAvatar):
             if self.clarabelleButtonObscured <= 0 and self.isTeleportAllowed():
                 if self.catalogNotify == ToontownGlobals.NewItems or self.mailboxNotify == ToontownGlobals.NewItems or self.simpleMailNotify == ToontownGlobals.NewItems or self.inviteMailNotify == ToontownGlobals.NewItems or self.awardNotify == ToontownGlobals.NewItems:
                     showClarabelle = not launcher or launcher.getPhaseComplete(5.5)
-                    if base.cr.playGame.getPlace().getState() == 'stickerBook':
+                    playGame = getattr(base.cr, 'playGame', None)
+                    place = playGame.getPlace() if playGame is not None else None
+                    if place is not None and place.getState() == 'stickerBook':
                         showClarabelle = 0
                     if showClarabelle:
                         newItemsInMailbox = self.mailboxNotify == ToontownGlobals.NewItems or self.awardNotify == ToontownGlobals.NewItems
@@ -2093,4 +2079,3 @@ class LocalToon(DistributedToon.DistributedToon, LocalAvatar.LocalAvatar):
     def getOverflowMod(self):
         """Returns the overflow modifier for this toon. Default is 100 (100%)."""
         return 100
-

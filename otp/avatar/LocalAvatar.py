@@ -29,6 +29,7 @@ from direct.controls.PhysicsWalker import PhysicsWalker
 from direct.controls.SwimWalker import SwimWalker
 from direct.controls.TwoDWalker import TwoDWalker
 from otp.avatar import ToontownControlManager
+from otp.avatar.SourceMovementWalker import SourceMovementWalker
 from toontown.toon.OrbitalCamera import OrbitalCamera
 from toontown.toon import Toon
 
@@ -89,7 +90,21 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
         self.showNametag2d()
         self.setPickable(0)
         self.cameraLerp = None
+        # Camera callbacks can run before the first smart-camera update (for
+        # example when leaving an NPC interaction).  Seed the fallback target
+        # so getLookAtPoint is always safe.
+        self.__curLookAt = Point3(0, 0, 3)
+        self.interactionTarget = None
+        self._interactionPressed = False
+        self.sourceBodyHeading = self.getH(render)
+        self.sourceCrouched = False
         self.orbitalCamera = OrbitalCamera(self)
+        # Listen to both the physical event and the translated InputState
+        # event.  The latch makes this safe even when both paths are active.
+        self.accept('e', self.handleInteraction)
+        self.accept('interact-on', self.handleInteraction)
+        self.accept('e-up', self.clearInteractionKey)
+        self.accept('interact-off', self.clearInteractionKey)
 
         # Some enums to make switching control modes easier
         self.NORMAL_SPEED_ENUM = 0
@@ -237,8 +252,6 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
                                       self.currentMovementMode[self.REVERSE_SPRINT_SPEED_ENUM], self.currentMovementMode[self.ROTATE_SPRINT_SPEED_ENUM])
         self.isSprinting = 1
 
-        if base.WANT_FOV_EFFECTS:
-            self.lerpFov(self.fov, self.fallbackFov + self.currentMovementMode[self.FOV_INCREASE_ENUM])
 
     def exitSprinting(self, lerpFov: bool = True):
 
@@ -249,9 +262,6 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
         self.currentReverseSpeed = self.currentMovementMode[self.REVERSE_NORMAL_SPEED_ENUM]
         self.controlManager.setSpeeds(self.currentMovementMode[self.NORMAL_SPEED_ENUM], OTPGlobals.ToonJumpForce,
                                       self.currentMovementMode[self.REVERSE_NORMAL_SPEED_ENUM], self.currentMovementMode[self.ROTATE_NORMAL_SPEED_ENUM])
-
-        if base.WANT_FOV_EFFECTS and lerpFov:
-            self.lerpFov(self.fov, self.fallbackFov)
 
         self.isSprinting = 0
 
@@ -340,7 +350,12 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
         return False
 
     def setupControls(self, avatarRadius = 1.4, floorOffset = OTPGlobals.FloorOffset, reach = 4.0, wallBitmask = OTPGlobals.WallBitmask, floorBitmask = OTPGlobals.FloorBitmask, ghostBitmask = OTPGlobals.GhostBitmask):
-        walkControls = GravityWalker(legacyLifter=self.wantLegacyLifter())
+        walkControls = SourceMovementWalker(
+            getMovementYaw=self.getSourceMovementYaw,
+            getMovementBasis=self.getSourceMovementBasis,
+            setBodyHeading=self.setSourceBodyHeading,
+            setCrouched=self.setSourceCrouched,
+            legacyLifter=self.wantLegacyLifter())
         walkControls.setWallBitMask(wallBitmask)
         walkControls.setFloorBitMask(floorBitmask)
         walkControls.initializeCollisions(self.cTrav, self, avatarRadius, floorOffset, reach)
@@ -513,6 +528,8 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
         self.camFloorRayNode.setPos(self.ccSphereNodePath, 0, 0, 0)
 
     def attachCamera(self):
+        if hasattr(self, 'orbitalCamera') and self.orbitalCamera.isActive():
+            return
         camera.reparentTo(self)
         base.enableMouse()
         base.setMouseOnNode(self.node())
@@ -520,6 +537,8 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
         self.setWalkSpeedNormal()
 
     def detachCamera(self):
+        if hasattr(self, 'orbitalCamera') and self.orbitalCamera.isActive():
+            return
         base.disableMouse()
     
     def getOldCameraPos(self):
@@ -582,13 +601,12 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
         return not self.sleepFlag and self.hp > 0
 
     def enableSmartCameraViews(self):
-        self.accept('tab', self.nextCameraPos, [1])
-        self.accept('shift-tab', self.nextCameraPos, [0])
-        self.accept('page_up', self.pageUp)
-        self.accept('page_down', self.pageDown)
+        # The legacy preset camera used these events. SourceCamera owns Tab
+        # and the wheel now, so re-enabling a pet/party camera must not steal
+        # the gameplay camera's input bindings.
+        return
 
     def disableSmartCameraViews(self):
-        self.ignore('tab')
         self.ignore('shift-tab')
         self.ignore('page_up')
         self.ignore('page_down')
@@ -606,6 +624,8 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
         if not self.avatarControlsEnabled:
             return
         self.avatarControlsEnabled = 0
+        self._interactionPressed = False
+        self.setSourceCrouched(False)
         self.ignoreAnimationEvents()
         self.controlManager.setTurn(1)
         self.controlManager.disable()
@@ -615,6 +635,101 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
 
     def setWalkSpeedNormal(self):
         self.controlManager.setSpeeds(OTPGlobals.ToonForwardSpeed, OTPGlobals.ToonJumpForce, OTPGlobals.ToonReverseSpeed, OTPGlobals.ToonRotateSpeed)
+
+    def getSourceMovementYaw(self):
+        if hasattr(self, 'orbitalCamera'):
+            return self.orbitalCamera.getViewYaw()
+        return self.getH(render)
+
+    def getSourceMovementBasis(self):
+        """Return the flattened forward/right vectors of the active camera."""
+        if hasattr(self, 'orbitalCamera') and self.orbitalCamera.isActive():
+            # Transform camera-local axes into render space.  The order is
+            # significant: camera.getRelativeVector(render, ...) performs
+            # the inverse conversion and points behind the lens at +/-90 H.
+            forward = render.getRelativeVector(
+                self.orbitalCamera, Vec3(0.0, 1.0, 0.0))
+            right = render.getRelativeVector(
+                self.orbitalCamera, Vec3(1.0, 0.0, 0.0))
+            return forward, right
+
+        radians = math.radians(self.getH(render))
+        return (Vec3(-math.sin(radians), math.cos(radians), 0.0),
+                Vec3(math.cos(radians), math.sin(radians), 0.0))
+
+    def setSourceBodyHeading(self, heading):
+        self.sourceBodyHeading = heading
+        self.setH(render, heading)
+        if hasattr(self, 'orbitalCamera'):
+            self.updateSourceHeadFacing(self.orbitalCamera.getViewYaw())
+
+    def updateSourceHeadFacing(self, cameraYaw):
+        """Keep the head aimed at the camera while the body moves freely."""
+        if not hasattr(self, 'headParts') or self.headParts is None:
+            return
+        relativeHeading = cameraYaw - self.getH(render)
+        for head in self.headParts:
+            if not head.isEmpty():
+                head.setH(self, relativeHeading)
+
+    def setSourceCrouched(self, crouched):
+        """Track the Source-style crouch state for movement and camera code."""
+        self.sourceCrouched = bool(crouched)
+
+    def setInteractionTarget(self, target):
+        self.interactionTarget = target
+
+    def clearInteractionTarget(self, target=None):
+        if target is None or self.interactionTarget is target:
+            self.interactionTarget = None
+
+    def handleInteraction(self):
+        if self._interactionPressed:
+            return
+
+        if self.interactionTarget is None:
+            self._findNearbyDoorInteraction()
+        if self.interactionTarget is None:
+            return
+
+        self._interactionPressed = True
+        interact = getattr(self.interactionTarget, 'interact', None)
+        if interact:
+            interact(self)
+
+    def _findNearbyDoorInteraction(self):
+        """Recover the door target if collision events were missed."""
+        if not hasattr(base, 'cr') or not hasattr(base.cr, 'doId2do'):
+            return
+
+        avatarPos = self.getPos(render)
+        closest = None
+        closestDistance = 8.0
+        for obj in base.cr.doId2do.values():
+            if obj is self or not callable(getattr(obj, 'interact', None)):
+                continue
+            getDoorNodePath = getattr(obj, 'getDoorNodePath', None)
+            if not getDoorNodePath:
+                continue
+            try:
+                doorNp = getDoorNodePath()
+                if doorNp.isEmpty():
+                    continue
+                distance = (doorNp.getPos(render) - avatarPos).length()
+            except Exception:
+                continue
+            if distance < closestDistance:
+                closest = obj
+                closestDistance = distance
+
+        if closest is not None:
+            # doorTrigger(None) is also used by the interior cleanup event;
+            # it now initializes the same local crossing state as a real
+            # collision entry.
+            closest.doorTrigger()
+
+    def clearInteractionKey(self):
+        self._interactionPressed = False
 
     def setWalkSpeedSlow(self):
         self.controlManager.setSpeeds(OTPGlobals.ToonForwardSlowSpeed, OTPGlobals.ToonJumpSlowForce, OTPGlobals.ToonReverseSlowSpeed, OTPGlobals.ToonRotateSlowSpeed)
@@ -775,6 +890,8 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
         print(')', end=' ')
 
     def posCamera(self, lerp, time):
+        if hasattr(self, 'orbitalCamera') and self.orbitalCamera.isActive():
+            return
         if not lerp:
             self.positionCameraWithPusher(self.getCompromiseCameraPos(), self.getLookAtPoint())
         else:
@@ -808,7 +925,15 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
         self.__curLookAt = Point3(la)
 
     def getLookAtPoint(self):
-        return Point3(self.__curLookAt)
+        try:
+            return Point3(self.__curLookAt)
+        except AttributeError:
+            # The camera can be aimed before the smart camera was ever set up
+            # (for instance when leaving an NPC shop with the orbital camera
+            # inactive), so fall back to looking at the Toon's head.
+            point = self.getPos() + self.getVisibilityPoint()
+            self.setLookAtPoint(point)
+            return Point3(self.__curLookAt)
 
     def setIdealCameraPos(self, pos):
         self.__idealCameraPos = Point3(pos)
@@ -824,6 +949,9 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
             return Point3(self.__idealCameraPos)
 
     def setCameraPositionByIndex(self, index):
+        if hasattr(self, 'orbitalCamera') and self.orbitalCamera.isActive():
+            self.orbitalCamera.setPresetPos(index, transition=False)
+            return
         self.notify.debug('switching to camera position %s' % index)
         self.setCameraSettings(self.cameraPositions[index])
 
@@ -840,6 +968,8 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
         self.posCamera(1, 0.7)
 
     def setCameraSettings(self, camSettings):
+        if hasattr(self, 'orbitalCamera') and self.orbitalCamera.isActive():
+            return
         self.setIdealCameraPos(camSettings[0])
         if self.isPageUp and self.isPageDown or not self.isPageUp and not self.isPageDown:
             self.__cameraHasBeenMoved = 1
@@ -909,8 +1039,6 @@ class LocalAvatar(DistributedAvatar.DistributedAvatar, DistributedSmoothNode.Dis
         return self.__geom
 
     def startUpdateSmartCamera(self, push = 1):
-        self.initCameraPositions()
-        self.setCameraPositionByIndex(self.cameraIndex)
         self.orbitalCamera.start()
         return
         if self._smartCamEnabled:

@@ -26,6 +26,8 @@ class Elevator(StateData.StateData):
         self.elevatorState = elevatorState
         self.distElevator = distElevator
         distElevator.elevatorFSM = self
+        self.actionBuilding = bool(getattr(getattr(distElevator, 'bldg', None),
+                                           'actionBuilding', False))
         self.reverseBoardingCamera = False
         self.skipDFABoard = 0
 
@@ -51,7 +53,14 @@ class Elevator(StateData.StateData):
 
     def enter(self):
         self.fsm.enterInitialState()
-        self.fsm.request('elevatorDFA')
+        if self.actionBuilding:
+            # Extraction buildings do not use the legacy boarding movie or
+            # its camera handoff.  The distributed elevator still receives
+            # the normal board request, then its door state closes around the
+            # player in the current camera mode.
+            self.fsm.request('requestBoard')
+        else:
+            self.fsm.request('elevatorDFA')
 
     def exit(self):
         self.ignoreAll()
@@ -110,7 +119,8 @@ class Elevator(StateData.StateData):
         self.enableExitButton()
 
     def exitBoarded(self):
-        self.cameraBoardTrack.finish()
+        if hasattr(self, 'cameraBoardTrack'):
+            self.cameraBoardTrack.finish()
         self.disableExitButton()
 
     def enableExitButton(self):

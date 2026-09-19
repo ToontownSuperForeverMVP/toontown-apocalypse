@@ -194,7 +194,10 @@ class Suit(Avatar.Avatar):
         Avatar.Avatar.__init__(self)
         self.setFont(ToontownGlobals.getSuitFont())
         self.setPlayerType(NametagGroup.CCSuit)
-        self.setPickable(1)
+        # Cogs are combat targets, not clickable avatar-info widgets.  Keeping
+        # their nametags pickable steals the same mouse button used by the
+        # first-person gag aim/fire system.
+        self.setPickable(0)
         self.leftHand = None
         self.rightHand = None
         self.shadowJoint = None

@@ -11,7 +11,7 @@ class StreetSign(DistributedObject.DistributedObject):
     RedownloadTaskName = 'RedownloadStreetSign'
     StreetSignFileName = config.GetString('street-sign-filename', 'texture.jpg')
     StreetSignBaseDir = config.GetString('street-sign-base-dir', 'sign')
-    StreetSignUrl = base.config.GetString('street-sign-url', 'http://cdn.toontown.disney.go.com/toontown/en/street-signs/img/')
+    StreetSignUrl = base.config.GetString('street-sign-url', '')
     #DO NOT revert this to the ttoffline link it was previously, it was causing people to be unable to load onto streets
     notify = DirectNotifyGlobal.directNotify.newCategory('StreetSign')
 
@@ -20,14 +20,17 @@ class StreetSign(DistributedObject.DistributedObject):
         self.percentDownloaded = 0.0
         self.startDownload = datetime.datetime.now()
         self.endDownload = datetime.datetime.now()
-        self.notify.info('Street sign url is %s' % self.StreetSignUrl)
-        self.redownloadStreetSign()
+        if self.StreetSignUrl:
+            self.notify.info('Street sign url is %s' % self.StreetSignUrl)
+            self.redownloadStreetSign()
 
     def replaceTexture(self):
         searchPath = DSearchPath()
         searchPath.appendDirectory(self.directory)
 
     def redownloadStreetSign(self):
+        if not self.StreetSignUrl:
+            return
         self.precentDownload = 0.0
         self.startRedownload = datetime.datetime.now()
         self.downloadingStreetSign = True

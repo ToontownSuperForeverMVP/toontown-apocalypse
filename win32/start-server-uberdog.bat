@@ -1,5 +1,5 @@
 @echo off
-title Super CFO: UD Launcher
+title Toontown Apocalypse: UberDOG Launcher
 set /P PPYTHON_PATH=<PPYTHON_PATH
 set SERVICE_TO_RUN=UD
 cd ..\

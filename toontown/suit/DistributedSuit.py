@@ -22,6 +22,8 @@ import math
 import copy
 from . import DistributedSuitBase
 from otp.otpbase import OTPLocalizer
+from toontown.action import ActionGlobals
+from toontown.toonbase import TTLocalizer
 import random
 STAND_OUTSIDE_DOOR = 2.5
 BATTLE_IGNORE_TIME = 6
@@ -57,6 +59,13 @@ class DistributedSuit(DistributedSuitBase.DistributedSuitBase, DelayDeletable):
         self.initState = None
         self.finalState = None
         self.buildingSuit = 0
+        # Real-time combat (Toontown Apocalypse)
+        self.actionState = ActionGlobals.COG_PATROL
+        self.actionFX = None
+        self.actionAnimTaskName = None
+        self.actionLastPos = None
+        self.actionCurrentAnim = None
+        self.actionDead = False
         self.fsm = ClassicFSM.ClassicFSM('DistributedSuit', [
             State.State('Off',
                         self.enterOff,
@@ -74,7 +83,8 @@ class DistributedSuit(DistributedSuitBase.DistributedSuitBase, DelayDeletable):
                             'FlyAway',
                             'DanceThenFlyAway',
                             'WalkToStreet',
-                            'WalkFromStreet']),
+                            'WalkFromStreet',
+                            'Action']),
          State.State('FromSky',
                      self.enterFromSky,
                      self.exitFromSky, [
@@ -82,7 +92,8 @@ class DistributedSuit(DistributedSuitBase.DistributedSuitBase, DelayDeletable):
                          'Battle',
                          'neutral',
                          'ToSky',
-                         'WalkFromStreet']),
+                         'WalkFromStreet',
+                         'Action']),
          State.State('FromSuitBuilding',
                      self.enterFromSuitBuilding,
                      self.exitFromSuitBuilding, [
@@ -90,7 +101,8 @@ class DistributedSuit(DistributedSuitBase.DistributedSuitBase, DelayDeletable):
                          'Walk',
                          'Battle',
                          'neutral',
-                         'ToSky']),
+                         'ToSky',
+                         'Action']),
          State.State('WalkToStreet',
                      self.enterWalkToStreet,
                      self.exitWalkToStreet, [
@@ -101,7 +113,8 @@ class DistributedSuit(DistributedSuitBase.DistributedSuitBase, DelayDeletable):
                          'ToToonBuilding',
                          'ToSuitBuilding',
                          'ToCogHQ',
-                         'WalkFromStreet']),
+                         'WalkFromStreet',
+                         'Action']),
          State.State('WalkFromStreet',
                      self.enterWalkFromStreet,
                      self.exitWalkFromStreet, [
@@ -110,7 +123,8 @@ class DistributedSuit(DistributedSuitBase.DistributedSuitBase, DelayDeletable):
                          'ToCogHQ',
                          'Battle',
                          'neutral',
-                         'ToSky']),
+                         'ToSky',
+                         'Action']),
          State.State('Walk',
                      self.enterWalk,
                      self.exitWalk, [
@@ -120,6 +134,15 @@ class DistributedSuit(DistributedSuitBase.DistributedSuitBase, DelayDeletable):
                          'WalkFromStreet',
                          'ToSky',
                          'ToCogHQ',
+                         'Walk',
+                         'Action']),
+         State.State('Action',
+                     self.enterAction,
+                     self.exitAction, [
+                         'FlyAway',
+                         'DanceThenFlyAway',
+                         'ToSky',
+                         'Off',
                          'Walk']),
          State.State('Battle',
                      self.enterBattle,
@@ -195,6 +218,7 @@ class DistributedSuit(DistributedSuitBase.DistributedSuitBase, DelayDeletable):
         self.resumePath(0)
         self.stopPathNow()
         self.setState('Off')
+        self._cleanupActionFX()
         DistributedSuitBase.DistributedSuitBase.disable(self)
 
     def delete(self):
@@ -397,22 +421,155 @@ class DistributedSuit(DistributedSuitBase.DistributedSuitBase, DelayDeletable):
             self.notify.warning('Suit %s created before its suit planner, %d' % (self.doId, self.spDoId))
         return
 
-    def d_requestBattle(self, pos, hpr):
-        self.cr.playGame.getPlace().setState('WaitForBattle')
-        self.sendUpdate('requestBattle', [pos[0],
-         pos[1],
-         pos[2],
-         hpr[0],
-         hpr[1],
-         hpr[2]])
-
     def __handleToonCollision(self, collEntry):
-        if not base.localAvatar.wantBattles:
+        # Bumping into a Cog no longer starts a turn-based battle.  Streets
+        # are real-time combat now; the collision tube only keeps the Cog
+        # solid so the Toon cannot walk through it.
+        return
+
+    # ------------------------------------------------------------------
+    # Real-time combat (Toontown Apocalypse)
+    # ------------------------------------------------------------------
+    def _getActionFX(self):
+        if self.actionFX is None:
+            from toontown.action.cog.CogAttackFX import CogAttackFX
+            self.actionFX = CogAttackFX(self)
+        return self.actionFX
+
+    def _cleanupActionFX(self):
+        if self.actionFX is not None:
+            self.actionFX.cleanup()
+            self.actionFX = None
+
+    def setActionState(self, state):
+        self.actionState = state
+        if self.actionDead:
             return
-        toonId = base.localAvatar.getDoId()
-        self.notify.debug('Distributed suit: requesting a Battle with ' + 'toon: %d' % toonId)
-        self.d_requestBattle(self.getPos(), self.getHpr())
-        self.setState('WaitForBattle')
+        if state in (ActionGlobals.COG_ALERT, ActionGlobals.COG_ENGAGE, ActionGlobals.COG_STAGGER,
+                     ActionGlobals.COG_LURED):
+            if self.fsm is not None and self.fsm.getCurrentState().getName() != 'Action':
+                self.setState('Action')
+            self._updateActionAnimForState(state)
+        elif state == ActionGlobals.COG_DEFEATED:
+            self._playActionDeath()
+        # COG_DEPARTING is followed by setPathState(2) which moves the FSM
+        # to FlyAway from wherever the Cog is standing.
+
+    def getActionState(self):
+        return self.actionState
+
+    def enterAction(self):
+        self.resumePath(0)
+        self.stopPathNow()
+        self.enableBattleDetect('action', self.__handleToonCollision)
+        self.enableRaycast(0)
+        self.startSmooth()
+        if self.corpMedallion:
+            self.corpMedallion.hide()
+        if self.healthBar:
+            self.healthBar.show()
+            if self.currHP < self.maxHP:
+                self.updateHealthBar(0, 1)
+        self.actionLastPos = Point3(self.getPos(render))
+        self.actionCurrentAnim = None
+        self.loop('neutral', 0)
+        self.actionAnimTaskName = self.taskName('actionAnim')
+        taskMgr.remove(self.actionAnimTaskName)
+        taskMgr.add(self.__actionAnimTask, self.actionAnimTaskName)
+
+    def exitAction(self):
+        if self.actionAnimTaskName:
+            taskMgr.remove(self.actionAnimTaskName)
+            self.actionAnimTaskName = None
+        self.stopSmooth()
+        self.disableBattleDetect()
+        if not self.actionDead:
+            self.clearColorScale()
+            if self.healthBar:
+                self.healthBar.hide()
+            if self.corpMedallion:
+                self.corpMedallion.show()
+        self._cleanupActionFX()
+
+    def _updateActionAnimForState(self, state):
+        if state == ActionGlobals.COG_ALERT:
+            self.setChatAbsolute(TTLocalizer.ActionCogNoticed, CFSpeech | CFTimeout)
+            self._setActionAnim('neutral')
+        elif state == ActionGlobals.COG_LURED:
+            self._setActionAnim('lured')
+        elif state == ActionGlobals.COG_STAGGER:
+            self.actionCurrentAnim = None
+
+    def _setActionAnim(self, animName, playRate=1.0):
+        if self.actionCurrentAnim == animName:
+            if animName == 'walk':
+                self.setPlayRate(playRate, 'walk')
+            return
+        self.actionCurrentAnim = animName
+        try:
+            self.loop(animName, 0)
+            if animName == 'walk':
+                self.setPlayRate(playRate, 'walk')
+        except Exception:
+            self.loop('neutral', 0)
+
+    def __actionAnimTask(self, task):
+        if self.isEmpty() or self.actionDead:
+            return Task.done
+        pos = Point3(self.getPos(render))
+        dt = max(1e-3, globalClock.getDt())
+        speed = 0.0
+        if self.actionLastPos is not None:
+            speed = (Vec3(pos - self.actionLastPos)).length() / dt
+        self.actionLastPos = pos
+        if self.actionFX is not None and self.actionFX.isAnimLocked():
+            self.actionCurrentAnim = None
+            return Task.cont
+        if self.freeGagReactionTrack and not self.freeGagReactionTrack.isStopped():
+            self.actionCurrentAnim = None
+            return Task.cont
+        if self.actionState == ActionGlobals.COG_LURED:
+            self._setActionAnim('lured')
+        elif speed > 0.6:
+            rate = max(0.7, min(1.9, speed / ToontownGlobals.SuitWalkSpeed))
+            self._setActionAnim('walk', rate)
+        else:
+            self._setActionAnim('neutral')
+        return Task.cont
+
+    def actionAttack(self, attackId, targetId, x, y, z, windupMs, mutation):
+        if self.actionDead:
+            return
+        self._getActionFX().playAttack(attackId, targetId, (x, y, z), windupMs, mutation)
+
+    def actionAttackResolved(self, attackId, toonId, damage):
+        if self.actionDead:
+            return
+        self._getActionFX().playResolved(attackId, toonId, damage)
+
+    def actionStatus(self, status, durationMs):
+        if self.actionDead:
+            return
+        self._getActionFX().playStatus(status, durationMs)
+
+    def actionDefeated(self, toonId, beans, track, xp, elite):
+        messenger.send('action-cog-defeated', [self.getDoId(), toonId, beans, track, xp, elite,
+                                               self.getStyleName(), self.getActualLevel()])
+        self._playActionDeath()
+
+    def _playActionDeath(self):
+        if self.actionDead:
+            return
+        self.actionDead = True
+        if self.actionAnimTaskName:
+            taskMgr.remove(self.actionAnimTaskName)
+            self.actionAnimTaskName = None
+        self.stopSmooth()
+        self.disableBattleDetect()
+        if self.healthBar:
+            self.healthBar.hide()
+        self.clearColorScale()
+        self._getActionFX().playDeath()
 
     def setAnimState(self, state):
         self.setState(state)

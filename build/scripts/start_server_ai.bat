@@ -1,5 +1,5 @@
 @echo off
-title Toontown Archipelago - AI (District) Server
+title Toontown Apocalypse - AI (District) Server
 set SERVICE_TO_RUN=AI
 cd game
 

@@ -1,5 +1,6 @@
 """OptionsPage module: contains the OptionsPage class"""
 import os
+import traceback
 from enum import IntEnum, auto
 from typing import Optional
 
@@ -71,6 +72,20 @@ OptionToType = {
 # so let's fill the dictionary as such.
 controls = list(base.settings.getControls())
 OptionToType.update(dict(zip(controls, [OptionTypes.CONTROL for _ in range(len(controls))])))
+
+
+def getOptionLabel(name: str) -> str:
+    """
+    Look up a setting's display name, tolerating settings that were added
+    without a localizer entry.  Missing strings used to raise a KeyError while
+    the options page was being built asynchronously, which took out the whole
+    page (and the client, on shutdown).
+    """
+    label = TTLocalizer.OptionNames.get(name)
+    if label is not None:
+        return label
+    OptionsPage.notify.warning('no localizer string for option: %s' % name)
+    return name.replace('-', ' ').replace('_', ' ').title()
 
 
 class OptionsPage(ShtikerPage):
@@ -174,10 +189,16 @@ class OptionsTabPage(DirectFrame, FSM):
 
         self.tabs: dict[str, DirectButton] = {}
         self.options: dict[str, OptionsScrolledFrame] = {}
+        self.exitButton = None
+        # The widgets below are built from asynchronous loader callbacks, so a
+        # page that is unloaded before they land has to ignore them.
+        self._unloaded = True
 
         self.load()
 
     def load(self) -> None:
+        self._unloaded = False
+
         # Load the Fish Page to borrow its tabs
         base.loader.loadModel("phase_3.5/models/gui/fishingBook", callback=self.loadTabs)
         # Load the "Exit Toontown" button
@@ -186,6 +207,10 @@ class OptionsTabPage(DirectFrame, FSM):
         base.loader.loadModel("phase_3/models/gui/quit_button", callback=self.createTabs)
 
     def loadTabs(self, gui):
+        if self._unloaded:
+            gui.remove_node()
+            return
+
         # The blue and yellow colors are trying to match the
         # rollover and select colors on the options page:
         normalColor = (1, 1, 1, 1)
@@ -211,9 +236,14 @@ class OptionsTabPage(DirectFrame, FSM):
                 extraArgs=[tab], pos=(x, 0, 0.77)
             )
 
+        self.updateTabs()
         gui.remove_node()
 
     def createExitButton(self, gui) -> None:
+        if self._unloaded:
+            gui.remove_node()
+            return
+
         self.exitButton = DirectButton(
             parent=self, relief=None,
             image=(gui.find("**/QuitBtn_UP"),
@@ -232,14 +262,28 @@ class OptionsTabPage(DirectFrame, FSM):
         gui.remove_node()
 
     def createTabs(self, gui) -> None:
+        if self._unloaded:
+            gui.remove_node()
+            return
+
         for tab, options in self.tabOptions.items():
-            frame = OptionsScrolledFrame(parent=self._parent, options=options, gui=gui)
+            # One malformed entry should only cost its own tab, not the page.
+            try:
+                frame = OptionsScrolledFrame(parent=self._parent, options=options, gui=gui)
+            except Exception:
+                OptionsPage.notify.warning('failed to build options tab: %s' % tab)
+                OptionsPage.notify.warning(traceback.format_exc())
+                continue
             frame.hide()
             self.options[tab] = frame
 
         gui.remove_node()
 
     def unload(self) -> None:
+        # Loader callbacks may still be in flight; make them no-ops from here
+        # on, and only destroy the widgets that actually finished loading.
+        self._unloaded = True
+
         for tab in self.tabs.values():
             tab.destroy()
 
@@ -247,8 +291,9 @@ class OptionsTabPage(DirectFrame, FSM):
 
         self.destroyOptions()
 
-        self.exitButton.destroy()
-        self.exitButton = None
+        if self.exitButton is not None:
+            self.exitButton.destroy()
+            self.exitButton = None
 
     def enter(self) -> None:
         self.show()
@@ -285,40 +330,49 @@ class OptionsTabPage(DirectFrame, FSM):
     FSM states
     """
 
-    def enterGameplay(self) -> None:
+    def _showOptionsTab(self, name) -> None:
+        # The frames arrive from the loader asynchronously, so entering a tab
+        # before they land simply means there is nothing to show yet.
         self.updateTabs()
-        self.options["Gameplay"].show()
+
+        frame = self.options.get(name)
+        if frame is not None:
+            frame.show()
+
+    def _hideOptionsTab(self, name) -> None:
+        frame = self.options.get(name)
+        if frame is not None:
+            frame.hide()
+
+    def enterGameplay(self) -> None:
+        self._showOptionsTab("Gameplay")
 
     def exitGameplay(self) -> None:
-        self.options["Gameplay"].hide()
+        self._hideOptionsTab("Gameplay")
 
     def enterPrivacy(self) -> None:
-        self.updateTabs()
-        self.options["Privacy"].show()
+        self._showOptionsTab("Privacy")
 
     def exitPrivacy(self) -> None:
-        self.options["Privacy"].hide()
+        self._hideOptionsTab("Privacy")
 
     def enterControls(self) -> None:
-        self.updateTabs()
-        self.options["Controls"].show()
+        self._showOptionsTab("Controls")
 
     def exitControls(self) -> None:
-        self.options["Controls"].hide()
+        self._hideOptionsTab("Controls")
 
     def enterVideo(self) -> None:
-        self.updateTabs()
-        self.options["Video"].show()
+        self._showOptionsTab("Video")
 
     def exitVideo(self) -> None:
-        self.options["Video"].hide()
+        self._hideOptionsTab("Video")
 
     def enterAudio(self) -> None:
-        self.updateTabs()
-        self.options["Audio"].show()
+        self._showOptionsTab("Audio")
 
     def exitAudio(self) -> None:
-        self.options["Audio"].hide()
+        self._hideOptionsTab("Audio")
 
     """
     Exit button
@@ -513,7 +567,7 @@ class OptionElement(DirectFrame):
 
         # The name of the setting.
         self.optionName = name
-        self.optionType = OptionToType[self.optionName]
+        self.optionType = OptionToType.get(self.optionName, OptionTypes.BUTTON)
 
         if self.optionType == OptionTypes.CONTROL:
             currSetting = self.formatKeybind(base.settings.getControl(name))
@@ -528,7 +582,7 @@ class OptionElement(DirectFrame):
         # the page.
         self.label = DirectLabel(
             parent=self, relief=None, pos=(-0.4, 0, z),
-            text=TTLocalizer.OptionNames[self.optionName],
+            text=getOptionLabel(self.optionName),
             text_scale=0.052,
         )
 

@@ -1,6 +1,7 @@
 from .ClickablePopup import *
 from ._constants import *
 from .ColorProfile import ColorProfile, GRAY
+from direct.gui.DirectGuiGlobals import PGButton
 
 
 class Nametag(ClickablePopup):
@@ -26,6 +27,25 @@ class Nametag(ClickablePopup):
         self.m_wordwrap = wordwrap
         self.m_has_region = False
         self.m_ival_name = 'flash-%d' % id(self)
+
+        # Keep custom nametag colors opt-in.  This preserves the normal libotp
+        # colors until a caller explicitly enables a ColorProfile.
+        self.use_color_profile: bool = False
+        self.color_profile: ColorProfile = GRAY
+
+    def usingColorProfile(self) -> bool:
+        return self.use_color_profile
+
+    def setUseColorProfile(self, flag: bool):
+        self.use_color_profile = flag
+        self.updateContents()
+
+    def getColorProfile(self) -> ColorProfile:
+        return self.color_profile
+
+    def setColorProfile(self, color_profile: ColorProfile):
+        self.color_profile = color_profile
+        self.updateContents()
 
     def clearAvatar(self):
         self.m_avatar = None

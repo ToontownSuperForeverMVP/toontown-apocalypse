@@ -1527,7 +1527,7 @@ class SetInventory(MagicWord):
                 return "Invalid target track index: {0}".format(targetTrack)
             if (targetTrack != -1) and (not toon.hasTrackAccess(targetTrack)):
                 return "The target Toon doesn't have target track index: {0}".format(targetTrack)
-            inventory.maxInventory(maxLevel=level, clearFirst=True)
+            inventory.maxInventory(maxGagLevel=level, clearFirst=True)
             toon.b_setInventory(inventory.makeNetString())
             if targetTrack == -1:
                 return "Inventory restocked."
@@ -3736,6 +3736,190 @@ class SandboxBattle(MagicWord):
         battle.start(toon.doId, otherToons=teammates)
         suff = f" and {len(teammates)} others!" if len(teammates) > 0 else '!'
         return f"Started a sandbox battle for {toon.getName()}{suff}"
+
+
+# ---------------------------------------------------------------------------
+# Toontown Apocalypse: real-time street combat dev words
+# ---------------------------------------------------------------------------
+def _getStreetDirector(toon):
+    """Return the StreetDirectorAI for the street the toon is standing on."""
+    zoneId = getattr(toon, 'zoneId', None)
+    if zoneId is None:
+        return None
+    branch = ZoneUtil.getBranchZone(zoneId)
+    planner = simbase.air.suitPlanners.get(branch)
+    if planner is None:
+        return None
+    return getattr(planner, 'actionDirector', None)
+
+
+def _parseTrack(trackName):
+    names = ('toonup', 'trap', 'lure', 'sound', 'throw', 'squirt', 'drop')
+    aliases = {'toon-up': 'toonup', 'heal': 'toonup'}
+    trackName = aliases.get(trackName.lower(), trackName.lower())
+    if trackName not in names:
+        return None
+    return names.index(trackName)
+
+
+class SetTier(MagicWord):
+    aliases = ["tier", "streettier"]
+    desc = "Sets the difficulty tier (1-10) of the street you are standing on."
+    execLocation = MagicWordConfig.EXEC_LOC_SERVER
+    arguments = [("tier", int, True)]
+    accessLevel = 'USER'
+
+    def handleWord(self, invoker, avId, toon, *args):
+        from toontown.action import ActionGlobals
+        tier = args[0]
+        if not ActionGlobals.MIN_TIER <= tier <= ActionGlobals.MAX_TIER:
+            return 'Tier must be between %d and %d.' % (ActionGlobals.MIN_TIER, ActionGlobals.MAX_TIER)
+        director = _getStreetDirector(toon)
+        if director is None:
+            return 'You need to be standing on a street.'
+        director.setTier(tier)
+        return 'Street tier set to %d.' % tier
+
+
+class SetPressure(MagicWord):
+    aliases = ["pressure", "cogpressure"]
+    desc = "Sets the rolling Cog Pressure (0-1000) of the street you are standing on."
+    execLocation = MagicWordConfig.EXEC_LOC_SERVER
+    arguments = [("pressure", int, True)]
+    accessLevel = 'USER'
+
+    def handleWord(self, invoker, avId, toon, *args):
+        from toontown.action import ActionGlobals
+        pressure = max(0, min(ActionGlobals.MAX_PRESSURE, args[0]))
+        director = _getStreetDirector(toon)
+        if director is None:
+            return 'You need to be standing on a street.'
+        director.debugSetPressure(pressure)
+        return 'Cog Pressure set to %d (%s).' % (pressure, director.pressure.getStageName())
+
+
+class DiscoverTrack(MagicWord):
+    aliases = ["discover", "unlocktrack"]
+    desc = "Discovers a gag track (or 'all') as if a Gag Cache had been opened."
+    execLocation = MagicWordConfig.EXEC_LOC_SERVER
+    arguments = [("track", str, False, 'all')]
+    accessLevel = 'USER'
+
+    def handleWord(self, invoker, avId, toon, *args):
+        from toontown.action import ActionGlobals
+        trackName = args[0]
+        access = list(toon.getTrackAccess() or [0] * ActionGlobals.NUM_TRACKS)
+        while len(access) < ActionGlobals.NUM_TRACKS:
+            access.append(0)
+        if trackName.lower() == 'all':
+            tracks = list(ActionGlobals.ALL_TRACKS)
+        else:
+            track = _parseTrack(trackName)
+            if track is None:
+                return 'Unknown track. Use toonup, trap, lure, sound, throw, squirt, drop or all.'
+            tracks = [track]
+        for track in tracks:
+            access[track] = max(access[track], 1)
+        toon.b_setTrackAccess(access)
+        return 'Discovered: %s.' % ', '.join(ActionGlobals.TRACK_NAMES[track] for track in tracks)
+
+
+class SetGagTier(MagicWord):
+    aliases = ["gagtier", "tracktier"]
+    desc = "Sets the owned tier (0-3) of a gag track, bypassing the jellybean cost."
+    execLocation = MagicWordConfig.EXEC_LOC_SERVER
+    arguments = [("track", str, True), ("tier", int, True)]
+    accessLevel = 'USER'
+
+    def handleWord(self, invoker, avId, toon, *args):
+        from toontown.action import ActionGlobals, ActionProgression
+        track = _parseTrack(args[0])
+        tier = args[1]
+        if track is None:
+            return 'Unknown track. Use toonup, trap, lure, sound, throw, squirt or drop.'
+        if not 0 <= tier <= ActionGlobals.MAX_TRACK_TIER:
+            return 'Tier must be between 0 and %d.' % ActionGlobals.MAX_TRACK_TIER
+        access = list(toon.getTrackAccess() or [0] * ActionGlobals.NUM_TRACKS)
+        while len(access) < ActionGlobals.NUM_TRACKS:
+            access.append(0)
+        access[track] = tier
+        toon.b_setTrackAccess(access)
+        if tier == 0:
+            toon.b_setEquippedTracks(ActionProgression.normalizeLoadout(toon.getEquippedTracks(), toon))
+        return '%s set to Tier %d.' % (ActionGlobals.TRACK_NAMES[track], tier)
+
+
+class SetMastery(MagicWord):
+    aliases = ["mastery", "gagxp"]
+    desc = "Sets the mastery XP of a gag track."
+    execLocation = MagicWordConfig.EXEC_LOC_SERVER
+    arguments = [("track", str, True), ("xp", int, True)]
+    accessLevel = 'USER'
+
+    def handleWord(self, invoker, avId, toon, *args):
+        from toontown.action import ActionGlobals
+        track = _parseTrack(args[0])
+        if track is None:
+            return 'Unknown track. Use toonup, trap, lure, sound, throw, squirt or drop.'
+        xp = max(0, min(ActionGlobals.MAX_TRACK_XP, args[1]))
+        toon.experience.setExp(track, xp)
+        toon.b_setExperience(toon.experience.getCurrentExperience())
+        return '%s mastery set to %d.' % (ActionGlobals.TRACK_NAMES[track], toon.experience.getExp(track))
+
+
+class EquipTracks(MagicWord):
+    aliases = ["equip", "loadout"]
+    desc = "Equips up to three discovered gag tracks, e.g. ~equip throw squirt sound."
+    execLocation = MagicWordConfig.EXEC_LOC_SERVER
+    arguments = [("first", str, True), ("second", str, False, ''), ("third", str, False, '')]
+    accessLevel = 'USER'
+
+    def handleWord(self, invoker, avId, toon, *args):
+        from toontown.action import ActionGlobals, ActionProgression
+        tracks = []
+        for name in args:
+            if not name:
+                continue
+            track = _parseTrack(name)
+            if track is None:
+                return 'Unknown track: %s' % name
+            tracks.append(track)
+        loadout = ActionProgression.normalizeLoadout(tracks, toon)
+        toon.b_setEquippedTracks(loadout)
+        equipped = [ActionGlobals.TRACK_NAMES[track] for track in loadout if track >= 0]
+        return 'Equipped: %s.' % (', '.join(equipped) if equipped else 'nothing')
+
+
+class SpawnCache(MagicWord):
+    aliases = ["cache", "gagcache"]
+    desc = "Spawns a Gag Cache on the street you are standing on."
+    execLocation = MagicWordConfig.EXEC_LOC_SERVER
+    accessLevel = 'USER'
+
+    def handleWord(self, invoker, avId, toon, *args):
+        director = _getStreetDirector(toon)
+        if director is None:
+            return 'You need to be standing on a street.'
+        if not director.debugSpawnCache():
+            return 'Could not spawn a cache (one may already exist).'
+        return 'A Gag Cache has been placed on this street.'
+
+
+class SkipActionTutorial(MagicWord):
+    aliases = ["skiptutorial", "actiontutorial"]
+    desc = "Immediately finishes the guided combat tutorial you are in."
+    execLocation = MagicWordConfig.EXEC_LOC_SERVER
+    accessLevel = 'USER'
+
+    def handleWord(self, invoker, avId, toon, *args):
+        manager = getattr(simbase.air, 'actionTutorialManager', None)
+        if manager is None:
+            return 'The guided tutorial is not running.'
+        session = manager.getSession(avId)
+        if session is None:
+            return 'You are not in the guided tutorial.'
+        session._finish(False)
+        return 'Guided tutorial skipped.'
 
 
 # Use this command template for spawning objects client side to tweak attributes quickly

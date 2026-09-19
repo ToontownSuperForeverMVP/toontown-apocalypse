@@ -1,5 +1,5 @@
 @echo off
-title Super CFO: Client 1 Launcher
+title Toontown Apocalypse: Client Launcher
 set /P PPYTHON_PATH=<PPYTHON_PATH
 set SERVICE_TO_RUN=CLIENT
 cd ..\

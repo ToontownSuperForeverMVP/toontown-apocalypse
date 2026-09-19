@@ -1,5 +1,6 @@
 import math
 
+from direct.gui.DirectGuiGlobals import PGButton
 from panda3d.core import *
 
 from . import NametagGlobals

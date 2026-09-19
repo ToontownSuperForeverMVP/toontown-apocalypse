@@ -2,7 +2,7 @@
 version v0.18.5 Alpha
 
 
-server-version supercfo
+server-version toontown-apocalypse
 
 # Developer settings
 want-dev false
@@ -21,7 +21,7 @@ default-directnotify-level info
 
 # Window settings
 load-display pandagl
-window-title Super CFO
+window-title Toontown Apocalypse
 win-origin -2 -2
 depth-bits 24
 frame-rate-meter-text-pattern %0.f FPS

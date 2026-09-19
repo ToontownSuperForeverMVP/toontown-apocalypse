@@ -61,6 +61,8 @@ class DistributedDoor(DistributedObject.DistributedObject, DelayDeletable):
         self.avatarExitIDList = []
         self.doorTrack = None
         self.doorExitTrack = None
+        self._sourceDoorArmed = False
+        self._sourceDoorRequestSent = False
         return
 
     def disable(self):
@@ -68,6 +70,9 @@ class DistributedDoor(DistributedObject.DistributedObject, DelayDeletable):
         taskMgr.remove(self.checkIsDoorHitTaskName())
         self.ignore(self.getEnterTriggerEvent())
         self.ignore(self.getExitTriggerEvent())
+        taskMgr.remove(self.checkIsDoorHitTaskName())
+        if hasattr(base, 'localAvatar'):
+            base.localAvatar.clearInteractionTarget(self)
         self.ignore('clearOutToonInterior')
         self.fsm.request('off')
         self.exitDoorFSM.request('off')
@@ -230,8 +235,10 @@ class DistributedDoor(DistributedObject.DistributedObject, DelayDeletable):
         return self.building
 
     def readyToExit(self):
-        base.transitions.fadeScreen(1.0)
-        self.sendUpdate('requestExit')
+        # The legacy client opened the exit door as soon as the interior
+        # loaded.  Exit doors now use the same explicit E interaction as
+        # exterior doors, so arrival never starts an invisible door track.
+        return
 
     def avatarEnterDoorTrack(self, avatar, duration):
         trackName = 'avatarEnterDoor-%d-%d' % (self.doId, avatar.doId)
@@ -272,15 +279,69 @@ class DistributedDoor(DistributedObject.DistributedObject, DelayDeletable):
             return Func(avatar.setAnimState, animName)
 
     def isDoorHit(self):
-        vec = base.localAvatar.getRelativeVector(self.currentDoorNp, self.currentDoorVec)
-        netScale = self.currentDoorNp.getNetTransform().getScale()
-        yToTest = vec.getY() / netScale[1]
-        return yToTest < -0.5
+        if not hasattr(self, 'currentDoorNp'):
+            return False
+
+        # Test the avatar against the actual doorway plane.  The old test
+        # only examined the collision normal, so an E interaction could arm
+        # the door without ever knowing whether the toon crossed it.
+        try:
+            localPos = self.currentDoorNp.getRelativePoint(
+                render, base.localAvatar.getPos(render))
+            currentY = localPos.getY()
+            startY = getattr(self, '_sourceDoorStartY', currentY)
+            if abs(currentY) <= 0.75:
+                return True
+            return startY * currentY < 0.0
+        except Exception:
+            # Preserve compatibility with unusual legacy door nodes that do
+            # not expose a usable transform.
+            vec = base.localAvatar.getRelativeVector(
+                self.currentDoorNp, self.currentDoorVec)
+            netScale = self.currentDoorNp.getNetTransform().getScale()
+            return vec.getY() / netScale[1] < -0.5
+
+    def isOpen(self):
+        fsm = self.exitDoorFSM if self._isInteriorDoor() else self.fsm
+        return fsm.getCurrentState().getName() in ('open', 'opening')
+
+    def _isInteriorDoor(self):
+        return self.doorType in (DoorTypes.INT_STANDARD, DoorTypes.INT_HQ,
+                                 DoorTypes.INT_COGHQ, DoorTypes.INT_KS,
+                                 DoorTypes.INT_HOUSE)
+
+    def interact(self, avatar):
+        if avatar is not base.localAvatar or not hasattr(self, 'currentDoorNp'):
+            return
+        if self.isOpen():
+            self._sourceDoorArmed = False
+            taskMgr.remove(self.checkIsDoorHitTaskName())
+            self.sendUpdate('requestClose')
+        else:
+            self.enterDoor()
 
     def enterDoor(self):
-        if self.allowedToEnter():
-            messenger.send('DistributedDoor_doorTrigger')
-            self.sendUpdate('requestEnter')
+        accessAlreadyChecked = getattr(self, '_sourceAccessGranted', False)
+        self._sourceAccessGranted = False
+        exteriorDoor = self.doorType in (
+            DoorTypes.EXT_STANDARD, DoorTypes.EXT_HQ,
+            DoorTypes.EXT_HOUSE, DoorTypes.EXT_COGHQ,
+            DoorTypes.EXT_KS, DoorTypes.EXT_ANIM_STANDARD)
+        # Let the AI make the authoritative access decision.  The old local
+        # ttAccess gate could silently swallow E before requestEnter ever
+        # reached the door, which is why ordinary buildings appeared dead.
+        if self._isInteriorDoor() or accessAlreadyChecked or exteriorDoor:
+            # Request the server-side door state, but do not transition zones
+            # yet. The transition is emitted only after the toon crosses the
+            # actual door plane.
+            self._sourceDoorArmed = True
+            self._sourceDoorRequestSent = True
+            if self._isInteriorDoor():
+                self.sendUpdate('requestExit')
+            else:
+                self.sendUpdate('requestEnter')
+            taskMgr.remove(self.checkIsDoorHitTaskName())
+            taskMgr.add(self.checkIsDoorHitTask, self.checkIsDoorHitTaskName())
         else:
             place = base.cr.playGame.getPlace()
             if place:
@@ -308,41 +369,68 @@ class DistributedDoor(DistributedObject.DistributedObject, DelayDeletable):
         return 'checkIsDoorHit' + self.getTriggerName()
 
     def checkIsDoorHitTask(self, task):
-        if self.isDoorHit():
-            self.ignore(self.checkIsDoorHitTaskName())
+        if self.isDoorHit() and self._sourceDoorArmed:
             self.ignore(self.getExitTriggerEvent())
-            self.enterDoor()
+            self._sourceDoorArmed = False
+            messenger.send('DistributedDoor_doorTrigger')
+            if self._isInteriorDoor():
+                self.sendUpdate('requestClose')
+                self.exitCompleted()
+            else:
+                self.done = 1
+                # The exterior door is closed as part of the hand-off so the
+                # Place FSM can finish its load request without an automatic
+                # one-second door timer.
+                self.sendUpdate('requestClose')
             return Task.done
         return Task.cont
 
     def cancelCheckIsDoorHitTask(self, args):
         taskMgr.remove(self.checkIsDoorHitTaskName())
-        del self.currentDoorNp
-        del self.currentDoorVec
+        self._sourceDoorArmed = False
+        if hasattr(self, 'currentDoorNp'):
+            del self.currentDoorNp
+        if hasattr(self, 'currentDoorVec'):
+            del self.currentDoorVec
+        if hasattr(self, '_sourceDoorStartY'):
+            del self._sourceDoorStartY
+        base.localAvatar.clearInteractionTarget(self)
         self.ignore(self.getExitTriggerEvent())
         self.accept(self.getEnterTriggerEvent(), self.doorTrigger)
 
     def doorTrigger(self, args = None):
         self.ignore(self.getEnterTriggerEvent())
-        if args == None:
-            self.enterDoor()
-        else:
+        if args is not None:
             self.currentDoorNp = NodePath(args.getIntoNodePath())
             self.currentDoorVec = Vec3(args.getSurfaceNormal(self.currentDoorNp))
+        else:
+            self.currentDoorNp = self.getDoorNodePath()
+            self.currentDoorVec = Vec3(0, 1, 0)
+        try:
+            self._sourceDoorStartY = self.currentDoorNp.getRelativePoint(
+                render, base.localAvatar.getPos(render)).getY()
+        except Exception:
+            self._sourceDoorStartY = 1.0
+        if hasattr(base, 'localAvatar'):
+            base.localAvatar.setInteractionTarget(self)
+        self.accept(self.getExitTriggerEvent(), self.cancelCheckIsDoorHitTask)
+        if self._sourceDoorArmed:
             if self.isDoorHit():
-                self.enterDoor()
+                self._sourceDoorArmed = False
+                messenger.send('DistributedDoor_doorTrigger')
+                if self._isInteriorDoor():
+                    self.sendUpdate('requestClose')
+                    self.exitCompleted()
+                else:
+                    self.done = 1
+                    self.sendUpdate('requestClose')
             else:
-                self.accept(self.getExitTriggerEvent(), self.cancelCheckIsDoorHitTask)
                 taskMgr.add(self.checkIsDoorHitTask, self.checkIsDoorHitTaskName())
         return
 
     def avatarEnter(self, avatarID):
         avatar = self.cr.doId2do.get(avatarID, None)
         if avatar:
-            avatar.setAnimState('neutral')
-            track = self.avatarEnqueueTrack(avatar, 0.5)
-            track.start()
-            self.avatarTracks.append(track)
             self.avatarIDList.append(avatarID)
         return
 
@@ -444,8 +532,6 @@ class DistributedDoor(DistributedObject.DistributedObject, DelayDeletable):
     def avatarExit(self, avatarID):
         if avatarID in self.avatarIDList:
             self.avatarIDList.remove(avatarID)
-            if avatarID == base.localAvatar.doId:
-                self.exitCompleted()
         else:
             self.avatarExitIDList.append(avatarID)
 
@@ -548,15 +634,8 @@ class DistributedDoor(DistributedObject.DistributedObject, DelayDeletable):
         pass
 
     def enterOpen(self, ts):
-        for avatarID in self.avatarIDList:
-            avatar = self.cr.doId2do.get(avatarID)
-            if avatar:
-                track = self.avatarEnterDoorTrack(avatar, 1.0)
-                track.start(ts)
-                self.avatarTracks.append(track)
-            if avatarID == base.localAvatar.doId:
-                self.done = 1
-
+        # Avatars are no longer moved by the door state machine. They walk
+        # through the opening under normal collision/movement control.
         self.avatarIDList = []
 
     def exitOpen(self):
@@ -621,13 +700,7 @@ class DistributedDoor(DistributedObject.DistributedObject, DelayDeletable):
         pass
 
     def exitDoorEnterOpen(self, ts):
-        for avatarID in self.avatarExitIDList:
-            avatar = self.cr.doId2do.get(avatarID)
-            if avatar:
-                track = self.avatarExitTrack(avatar, 0.2)
-                track.start()
-                self.avatarExitTracks.append(track)
-
+        # Exit movement is likewise authored by the player, not a cutscene.
         self.avatarExitIDList = []
 
     def exitDoorExitOpen(self):

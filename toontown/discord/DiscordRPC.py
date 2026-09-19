@@ -85,7 +85,7 @@ class DiscordRPC(object):
         self.updateTask = None
         self.details = "Loading"  # text next to photo
         self.image = LOGO
-        self.imageTxt = 'Super CFO'  #Hover text for main image
+        self.imageTxt = 'Toontown Apocalypse'  # Hover text for main image
         self.state = '   '  #Displayed underneath details, used for boarding groups
         self.smallTxt = 'Loading'
         self.partySize = 1
@@ -278,4 +278,3 @@ class DiscordRPC(object):
             if self.discordTask is not None:
                 self.discordTask.cancel()
                 self.discordTask = None
-

@@ -216,9 +216,22 @@ class DistributedElevator(DistributedObject.DistributedObject):
                     localAvatar.boardingParty.forceCleanupInviterPanels()
                 if hasattr(base.localAvatar, 'elevatorNotifier'):
                     base.localAvatar.elevatorNotifier.cleanup()
+                actionBuilding = bool(getattr(self.bldg, 'actionBuilding', False))
                 cameraTrack = Sequence()
-                cameraTrack.append(Func(elevator.fsm.request, 'boarding', [self.getElevatorModel()]))
-                cameraTrack.append(Func(elevator.fsm.request, 'boarded'))
+                if actionBuilding:
+                    # Action buildings use the real avatar position and the
+                    # door interval as the presentation.  The old boarding
+                    # camera track was also the source of the apparent wall
+                    # at the threshold.
+                    cameraTrack.append(Func(elevator.fsm.request, 'boarded'))
+                    # The building-reclamation state uses this event as its
+                    # door-only ready signal.  In the normal suit state there
+                    # is no listener, so the same fast boarding path remains
+                    # safe for entry and return trips.
+                    cameraTrack.append(Func(messenger.send, 'insideVictorElevator'))
+                else:
+                    cameraTrack.append(Func(elevator.fsm.request, 'boarding', [self.getElevatorModel()]))
+                    cameraTrack.append(Func(elevator.fsm.request, 'boarded'))
             toon = self.cr.doId2do[avId]
             toon.stopSmooth()
             if not wantBoardingShow:
@@ -232,8 +245,14 @@ class DistributedElevator(DistributedObject.DistributedObject):
                 animFunc = Func(toon.setAnimState, 'neutral', 1.0)
             toon.headsUp(self.getElevatorModel(), Point3(*self.elevatorPoints[index]))
             toon.setGeomNodeH(0)
-            track = Sequence(animInFunc, LerpPosInterval(toon, TOON_BOARD_ELEVATOR_TIME * 0.75, Point3(*self.elevatorPoints[index]), other=self.getElevatorModel()), LerpHprInterval(toon, TOON_BOARD_ELEVATOR_TIME * 0.25, Point3(180, 0, 0), other=self.getElevatorModel()), Func(self.clearToonTrack, avId), animFunc, name=toon.uniqueName('fillElevator'), autoPause=1)
-            if wantBoardingShow:
+            if avId == base.localAvatar.getDoId() and getattr(self.bldg, 'actionBuilding', False):
+                track = Sequence(Func(toon.setPos, self.getElevatorModel(), Point3(*self.elevatorPoints[index])),
+                                 Func(toon.setHpr, self.getElevatorModel(), Vec3(180, 0, 0)),
+                                 Func(self.clearToonTrack, avId), animFunc,
+                                 name=toon.uniqueName('fillActionElevator'), autoPause=1)
+            else:
+                track = Sequence(animInFunc, LerpPosInterval(toon, TOON_BOARD_ELEVATOR_TIME * 0.75, Point3(*self.elevatorPoints[index]), other=self.getElevatorModel()), LerpHprInterval(toon, TOON_BOARD_ELEVATOR_TIME * 0.25, Point3(180, 0, 0), other=self.getElevatorModel()), Func(self.clearToonTrack, avId), animFunc, name=toon.uniqueName('fillElevator'), autoPause=1)
+            if wantBoardingShow and not actionBuilding:
                 boardingTrack, boardingTrackType = self.getBoardingTrack(toon, index, False)
                 track = Sequence(boardingTrack, track)
                 if avId == base.localAvatar.getDoId():

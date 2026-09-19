@@ -15,6 +15,7 @@ from toontown.building import SuitBuildingGlobals
 from toontown.building.DistributedBuildingAI import DistributedBuildingAI
 from toontown.toonbase import ToontownBattleGlobals
 from toontown.toonbase import ToontownGlobals
+from toontown.action.director.StreetDirectorAI import StreetDirectorAI
 import math, time, random
 
 class DistributedSuitPlannerAI(DistributedObjectAI.DistributedObjectAI, SuitPlannerBase.SuitPlannerBase):
@@ -174,6 +175,11 @@ class DistributedSuitPlannerAI(DistributedObjectAI.DistributedObjectAI, SuitPlan
         self.cogHQDoors = []
         self.battleList = []
         self.battleMgr = BattleManagerAI.BattleManagerAI(self.air)
+        # Real-time street combat director (Toontown Apocalypse).
+        self.actionDirector = StreetDirectorAI(self)
+        # A building floor temporarily borrows this planner as the action
+        # protocol endpoint while its Cogs live in an interior zone.
+        self.actionBuildingDirectors = {}
         self.setupDNA()
         if self.notify.getDebug():
             self.notify.debug('Creating a building manager AI in zone' + str(self.zoneId))
@@ -203,6 +209,9 @@ class DistributedSuitPlannerAI(DistributedObjectAI.DistributedObjectAI, SuitPlan
     def cleanup(self):
         taskMgr.remove(self.taskName('sptUpkeepPopulation'))
         taskMgr.remove(self.taskName('sptAdjustPopulation'))
+        if self.actionDirector is not None:
+            self.actionDirector.stop()
+            self.actionDirector = None
         for suit in self.suitList:
             suit.stopTasks()
             if suit.isGenerated():
@@ -290,6 +299,13 @@ class DistributedSuitPlannerAI(DistributedObjectAI.DistributedObjectAI, SuitPlan
     def calcDesiredNumFlyInSuits(self):
         if self.currDesired != None:
             return 0
+        # While a street run is active the director owns the population
+        # target; idle streets keep a light patrol so they never feel empty.
+        if self.actionDirector is not None and self.hoodInfoIdx >= 0:
+            hoodMin = self.SuitHoodInfo[self.hoodInfoIdx][self.SUIT_HOOD_INFO_MIN]
+            if self.actionDirector.isRunActive():
+                return self.actionDirector.getPopulationTarget()
+            return max(1, min(hoodMin, self.baseNumSuits + self.suitCountAdjust))
         return self.baseNumSuits + self.suitCountAdjust
 
     def calcDesiredNumBuildingSuits(self):
@@ -454,6 +470,8 @@ class DistributedSuitPlannerAI(DistributedObjectAI.DistributedObjectAI, SuitPlan
         newSuit.generateWithRequired(newSuit.zoneId)
         newSuit.moveToNextLeg(None)
         self.suitList.append(newSuit)
+        if self.actionDirector is not None:
+            self.actionDirector.registerSuit(newSuit)
         if newSuit.flyInSuit:
             self.numFlyInSuits += 1
         if newSuit.buildingSuit:
@@ -595,6 +613,8 @@ class DistributedSuitPlannerAI(DistributedObjectAI.DistributedObjectAI, SuitPlan
 
     def removeSuit(self, suit):
         self.zoneChange(suit, suit.zoneId)
+        if self.actionDirector is not None:
+            self.actionDirector.unregisterSuit(suit)
         if self.suitList.count(suit) > 0:
             self.suitList.remove(suit)
             if suit.flyInSuit:
@@ -1046,6 +1066,44 @@ class DistributedSuitPlannerAI(DistributedObjectAI.DistributedObjectAI, SuitPlan
     def initTasks(self):
         self.__waitForNextUpkeep()
         self.__waitForNextAdjust()
+        if self.actionDirector is not None:
+            self.actionDirector.start()
+
+    # ------------------------------------------------------------------
+    # Real-time street runs (Toontown Apocalypse)
+    # ------------------------------------------------------------------
+    def requestStreetRun(self, tier):
+        avId = self.air.getAvatarIdFromSender()
+        if self.actionDirector is not None and avId:
+            self.actionDirector.requestStreetRun(avId, tier)
+
+    def leaveStreetRun(self):
+        avId = self.air.getAvatarIdFromSender()
+        if self.actionDirector is not None and avId:
+            self.actionDirector.leaveStreetRun(avId)
+
+    def requestActionTrap(self, level, x, y, z):
+        avId = self.air.getAvatarIdFromSender()
+        director = self.actionBuildingDirectors.get(avId, self.actionDirector)
+        if director is not None and avId:
+            director.requestTrap(avId, level, x, y, z)
+
+    def requestActionToonUp(self, level):
+        avId = self.air.getAvatarIdFromSender()
+        director = self.actionBuildingDirectors.get(avId, self.actionDirector)
+        if director is not None and avId:
+            director.requestToonUp(avId, level)
+
+    def registerActionBuildingDirector(self, avId, director):
+        if avId:
+            self.actionBuildingDirectors[avId] = director
+
+    def unregisterActionBuildingDirector(self, avId, director=None):
+        if self.actionBuildingDirectors.get(avId) is director or director is None:
+            self.actionBuildingDirectors.pop(avId, None)
+
+    def getActionDirector(self):
+        return self.actionDirector
 
     def resyncSuits(self):
         for suit in self.suitList:

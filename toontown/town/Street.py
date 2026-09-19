@@ -19,10 +19,17 @@ from toontown.toonbase import ToontownGlobals
 from toontown.toon.Toon import teleportDebug
 from toontown.estate import HouseGlobals
 from toontown.toonbase import TTLocalizer
+from toontown.action.StreetRun import StreetRun
 from direct.interval.IntervalGlobal import *
 visualizeZones = base.config.GetBool('visualize-zones', 0)
 
 class Street(BattlePlace.BattlePlace):
+    """A street is a replayable real-time combat level.
+
+    The turn-based ``WaitForBattle`` / ``battle`` states are gone: walking
+    *is* the combat state.  On entry the Toon picks a difficulty tier
+    (``tierSelect``), after which roaming Cogs hunt them until they leave.
+    """
     notify = DirectNotifyGlobal.directNotify.newCategory('Street')
 
     def __init__(self, loader, parentFSM, doneEvent):
@@ -35,8 +42,7 @@ class Street(BattlePlace.BattlePlace):
          State.State('walk', self.enterWalk, self.exitWalk, ['push',
           'sit',
           'stickerBook',
-          'WaitForBattle',
-          'battle',
+          'tierSelect',
           'DFA',
           'trialerFA',
           'doorOut',
@@ -49,26 +55,28 @@ class Street(BattlePlace.BattlePlace):
           'fishing',
           'purchase',
           'died']),
+         State.State('tierSelect', self.enterTierSelect, self.exitTierSelect, ['walk',
+          'teleportOut',
+          'tunnelOut',
+          'quietZone',
+          'died']),
          State.State('sit', self.enterSit, self.exitSit, ['walk']),
          State.State('push', self.enterPush, self.exitPush, ['walk']),
          State.State('stickerBook', self.enterStickerBook, self.exitStickerBook, ['walk',
           'push',
           'sit',
-          'battle',
           'DFA',
           'trialerFA',
           'doorOut',
           'elevator',
           'tunnelIn',
           'tunnelOut',
-          'WaitForBattle',
           'teleportOut',
           'quest',
           'stopped',
           'fishing',
-          'purchase']),
-         State.State('WaitForBattle', self.enterWaitForBattle, self.exitWaitForBattle, ['battle', 'walk']),
-         State.State('battle', self.enterBattle, self.exitBattle, ['walk', 'teleportOut', 'died']),
+          'purchase',
+          'died']),
          State.State('doorIn', self.enterDoorIn, self.exitDoorIn, ['walk']),
          State.State('doorOut', self.enterDoorOut, self.exitDoorOut, ['walk']),
          State.State('elevatorIn', self.enterElevatorIn, self.exitElevatorIn, ['walk']),
@@ -79,10 +87,8 @@ class Street(BattlePlace.BattlePlace):
          State.State('DFAReject', self.enterDFAReject, self.exitDFAReject, ['walk']),
          State.State('teleportIn', self.enterTeleportIn, self.exitTeleportIn, ['walk',
           'teleportOut',
-          'quietZone',
-          'WaitForBattle',
-          'battle']),
-         State.State('teleportOut', self.enterTeleportOut, self.exitTeleportOut, ['teleportIn', 'quietZone', 'WaitForBattle']),
+          'quietZone']),
+         State.State('teleportOut', self.enterTeleportOut, self.exitTeleportOut, ['teleportIn', 'quietZone']),
          State.State('died', self.enterDied, self.exitDied, ['quietZone']),
          State.State('tunnelIn', self.enterTunnelIn, self.exitTunnelIn, ['walk']),
          State.State('tunnelOut', self.enterTunnelOut, self.exitTunnelOut, ['final']),
@@ -97,10 +103,30 @@ class Street(BattlePlace.BattlePlace):
         self.tunnelOriginList = []
         self.elevatorDoneEvent = 'elevatorDone'
         self.halloweenLights = []
+        self.streetRun = None
+        self.enterRequestStatus = None
+        self.tierPrompted = False
 
     def enter(self, requestStatus, visibilityFlag = 1, arrowsOn = 1):
         teleportDebug(requestStatus, 'Street.enter(%s)' % (requestStatus,))
         self._ttfToken = None
+        self.enterRequestStatus = requestStatus
+        self.tierPrompted = False
+        # The private tutorial street teaches the loop itself; starting a
+        # street run there would fight the tutorial coach for the screen and
+        # has no suit planner to talk to.
+        if self.isTutorialStreet():
+            self.streetRun = None
+        else:
+            existingRun = getattr(base, 'actionStreetRun', None)
+            if existingRun is not None and existingRun.runStarted and \
+                    (existingRun.buildingActive or existingRun.streetTransitionPending):
+                self.streetRun = existingRun
+                self.streetRun.returnToStreet(self)
+                self.tierPrompted = True
+            else:
+                self.streetRun = StreetRun(self)
+                self.streetRun.enter()
         self.fsm.enterInitialState()
         base.contentPackMusicManager.playMusic(self.loader.music, looping=True, interrupt=True, volume=0.8)
         self.loader.geom.reparentTo(render)
@@ -142,6 +168,23 @@ class Street(BattlePlace.BattlePlace):
         return
 
     def exit(self, visibilityFlag = 1):
+        if self.streetRun is not None:
+            if self._isActionBuildingTransferExit():
+                self.streetRun.exit()
+                self.streetRun.street = None
+            elif self._isStreetConnectorExit():
+                self.streetRun.preserveForStreetTransition()
+                self.streetRun.street = None
+            else:
+                # ``buildingActive`` is only a preservation hint for the
+                # elevator-to-interior transfer.  It must not turn a normal
+                # street exit into a run that survives forever.
+                self.streetRun.cancelBuilding()
+                self.streetRun.destroy()
+            self.streetRun = None
+        # Place.enterTunnelIn can leave a retry task behind when a tunnel
+        # origin is not ready.  It must not call back into an unloaded Street.
+        taskMgr.remove('retryTunnelIn')
         if visibilityFlag:
             self.visibilityOff()
         self.loader.geom.reparentTo(hidden)
@@ -164,6 +207,9 @@ class Street(BattlePlace.BattlePlace):
         self.parentFSM.getStateNamed('street').addChild(self.fsm)
 
     def unload(self):
+        if self.streetRun is not None:
+            self.streetRun.destroy()
+            self.streetRun = None
         self.parentFSM.getStateNamed('street').removeChild(self.fsm)
         del self.parentFSM
         del self.fsm
@@ -172,6 +218,39 @@ class Street(BattlePlace.BattlePlace):
         self.ignoreAll()
         BattlePlace.BattlePlace.unload(self)
         return
+
+    # ------------------------------------------------------------------
+    # Real-time combat (Toontown Apocalypse)
+    # ------------------------------------------------------------------
+    def isTutorialStreet(self):
+        hood = getattr(self.loader, 'hood', None)
+        return hood is not None and hood.id == ToontownGlobals.Tutorial
+
+    def enterWalk(self, teleportIn = 0):
+        # Skip BattlePlace.enterWalk: it listens for the legacy 'enterBattle'
+        # event, and there is no battle state on streets any more.
+        Place.Place.enterWalk(self, teleportIn)
+        if self.streetRun is not None and not self.tierPrompted:
+            self.tierPrompted = True
+            if self.streetRun.needsTierSelect(self.enterRequestStatus):
+                self.fsm.request('tierSelect')
+            else:
+                self.streetRun.startRun()
+
+    def exitWalk(self):
+        Place.Place.exitWalk(self)
+
+    def enterTierSelect(self):
+        base.localAvatar.b_setAnimState('neutral', 1)
+        base.localAvatar.laffMeter.start()
+        base.localAvatar.setTeleportAvailable(0)
+        if self.streetRun is not None:
+            self.streetRun.openTierSelect()
+
+    def exitTierSelect(self):
+        base.localAvatar.laffMeter.stop()
+        if self.streetRun is not None:
+            self.streetRun.closeTierSelect()
 
     def enterElevatorIn(self, requestStatus):
         self._eiwbTask = taskMgr.add(Functor(self._elevInWaitBldgTask, requestStatus['bldgDoId']), uniqueName('elevInWaitBldg'))
@@ -205,6 +284,8 @@ class Street(BattlePlace.BattlePlace):
         del self.elevator
 
     def detectedElevatorCollision(self, distElevator):
+        if self.streetRun is not None and getattr(getattr(distElevator, 'bldg', None), 'actionBuilding', False):
+            self.streetRun.beginBuilding()
         self.fsm.request('elevator', [distElevator])
         return None
 
@@ -215,8 +296,12 @@ class Street(BattlePlace.BattlePlace):
             if hasattr(base.localAvatar, 'elevatorNotifier') and base.localAvatar.elevatorNotifier.isNotifierOpen():
                 pass
             else:
+                if self.streetRun is not None:
+                    self.streetRun.cancelBuilding()
                 self.fsm.request('walk')
         elif where == 'exit':
+            if self.streetRun is not None:
+                self.streetRun.cancelBuilding()
             self.fsm.request('walk')
         elif where in ('suitInterior', 'cogdoInterior'):
             self.doneStatus = doneStatus
@@ -225,8 +310,22 @@ class Street(BattlePlace.BattlePlace):
             self.notify.error('Unknown mode: ' + where + ' in handleElevatorDone')
 
     def enterTunnelIn(self, requestStatus):
+        if not hasattr(self, 'loader') or self.loader is None:
+            self.notify.warning('Ignoring tunnel-in callback after Street unload')
+            return
         self.enterZone(requestStatus['zoneId'])
         BattlePlace.BattlePlace.enterTunnelIn(self, requestStatus)
+
+    def _isStreetConnectorExit(self):
+        status = getattr(self, 'doneStatus', None)
+        return bool(status and status.get('how') == 'tunnelIn'
+                    and status.get('where') == 'street'
+                    and status.get('shardId') is None)
+
+    def _isActionBuildingTransferExit(self):
+        status = getattr(self, 'doneStatus', None)
+        return bool(self.streetRun is not None and self.streetRun.buildingActive
+                    and status and status.get('where') in ('suitInterior', 'cogdoInterior'))
 
     def enterTeleportIn(self, requestStatus):
         teleportDebug(requestStatus, 'Street.enterTeleportIn(%s)' % (requestStatus,))
@@ -330,6 +429,9 @@ class Street(BattlePlace.BattlePlace):
         self.showAllVisibles()
 
     def doEnterZone(self, newZoneId):
+        if not hasattr(self, 'loader') or self.loader is None:
+            self.notify.warning('Ignoring zone visibility update after Street unload')
+            return
         if self.zoneId is not None:
             for i in self.loader.nodeDict[self.zoneId]:
                 if newZoneId:

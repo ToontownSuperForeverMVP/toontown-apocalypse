@@ -7,6 +7,7 @@ from direct.controls.ControlManager import CollisionHandlerRayStart
 from direct.task import Task
 from otp.otpbase import OTPGlobals
 from otp.avatar import DistributedAvatar
+from direct.distributed import DistributedSmoothNode
 from . import Suit
 from toontown.toonbase import ToontownGlobals
 from toontown.toonbase import ToontownBattleGlobals
@@ -24,7 +25,19 @@ from toontown.battle import BattleProps
 import math
 import copy
 
-class DistributedSuitBase(DistributedAvatar.DistributedAvatar, Suit.Suit, SuitBase.SuitBase):
+class DistributedSuitBase(DistributedAvatar.DistributedAvatar, Suit.Suit, SuitBase.SuitBase,
+                          DistributedSmoothNode.DistributedSmoothNode):
+    """Client base for street Cogs.
+
+    The dc declares ``DistributedSuitBase : DistributedSmoothNode`` and the
+    real-time combat controller streams Cog movement with ``setSmPosHpr`` /
+    ``setSmStop``, so the client half has to mix in the smooth node exactly
+    like :class:`~toontown.toon.DistributedToon` does.  Without it the Action
+    state cannot start (``startSmooth`` is missing) and a fighting Cog is
+    drawn frozen at its spawn point, which makes shots look like they pass
+    straight through it.
+    """
+
     notify = DirectNotifyGlobal.directNotify.newCategory('DistributedSuitBase')
 
     def __init__(self, cr):
@@ -37,6 +50,7 @@ class DistributedSuitBase(DistributedAvatar.DistributedAvatar, Suit.Suit, SuitBa
         DistributedAvatar.DistributedAvatar.__init__(self, cr)
         Suit.Suit.__init__(self)
         SuitBase.SuitBase.__init__(self)
+        DistributedSmoothNode.DistributedSmoothNode.__init__(self, cr)
         self.activeShadow = 0
         self.virtual = 0
         self.battleDetectName = None
@@ -51,6 +65,7 @@ class DistributedSuitBase(DistributedAvatar.DistributedAvatar, Suit.Suit, SuitBa
         self.prop = None
         self.propInSound = None
         self.propOutSound = None
+        self.freeGagReactionTrack = None
         self.reparentTo(hidden)
         self.loop('neutral')
         self.skeleRevives = 0
@@ -129,14 +144,30 @@ class DistributedSuitBase(DistributedAvatar.DistributedAvatar, Suit.Suit, SuitBa
 
     def generate(self):
         DistributedAvatar.DistributedAvatar.generate(self)
+        DistributedSmoothNode.DistributedSmoothNode.generate(self)
+
+    # Keep these explicit because Suit/SuitBase have their own movement
+    # helpers and can win the MRO lookup on some Panda builds.  Action Cogs
+    # must use the DistributedSmoothNode implementation or the AI's chase
+    # position packets never reach the rendered Cog.
+    def startSmooth(self):
+        return DistributedSmoothNode.DistributedSmoothNode.startSmooth(self)
+
+    def stopSmooth(self):
+        return DistributedSmoothNode.DistributedSmoothNode.stopSmooth(self)
 
     def disable(self):
         self.notify.debug('DistributedSuit %d: disabling' % self.getDoId())
+        if self.freeGagReactionTrack:
+            self.freeGagReactionTrack.finish()
+            self.freeGagReactionTrack = None
         self.ignoreAll()
         self.__removeCollisionData()
         self.cleanupLoseActor()
         self.stop()
+        self.stopSmooth()
         taskMgr.remove(self.uniqueName('blink-task'))
+        DistributedSmoothNode.DistributedSmoothNode.disable(self)
         DistributedAvatar.DistributedAvatar.disable(self)
 
     def delete(self):
@@ -148,6 +179,7 @@ class DistributedSuitBase(DistributedAvatar.DistributedAvatar, Suit.Suit, SuitBa
             del self.dna
             del self.sp
             DistributedAvatar.DistributedAvatar.delete(self)
+            DistributedSmoothNode.DistributedSmoothNode.delete(self)
             Suit.Suit.delete(self)
             SuitBase.SuitBase.delete(self)
 
@@ -169,6 +201,49 @@ class DistributedSuitBase(DistributedAvatar.DistributedAvatar, Suit.Suit, SuitBa
         else:
             self.currHP = hp
         return None
+
+    FREE_GAG_REACTION_ANIMS = {
+        ToontownBattleGlobals.THROW_TRACK: 'pie-small-react',
+        ToontownBattleGlobals.SQUIRT_TRACK: 'squirt-small-react',
+        ToontownBattleGlobals.SOUND_TRACK: 'squirt-small-react',
+        ToontownBattleGlobals.DROP_TRACK: 'drop-react',
+        ToontownBattleGlobals.TRAP_TRACK: 'slip-forward',
+    }
+
+    def freeGagHit(self, avId, track, level, damage):
+        """Show the impact received from a free-aim gag."""
+        if damage <= 0:
+            return
+
+        self.showHpText(-damage, attackTrack=track)
+        if self.healthBar:
+            self.healthBar.show()
+            if self.corpMedallion:
+                self.corpMedallion.hide()
+            self.updateHealthBar(damage)
+
+        if hasattr(base, 'localAvatar') and avId == base.localAvatar.getDoId():
+            messenger.send('action-gag-hit', [self.getDoId(), track, level, damage])
+
+        if self.freeGagReactionTrack:
+            self.freeGagReactionTrack.finish()
+
+        reactionAnim = self.FREE_GAG_REACTION_ANIMS.get(track, 'flail')
+        try:
+            self.freeGagReactionTrack = Sequence(
+                ActorInterval(self, reactionAnim, duration=min(0.9, self.getDuration(reactionAnim))),
+                Func(self.loop, 'neutral'),
+                name=self.uniqueName('freeGagReaction'))
+            self.freeGagReactionTrack.start()
+        except Exception:
+            # A specialty Cog may not have the small reaction animation in its
+            # reduced animation dictionary.  Flail is part of the shared Cog
+            # animation set and still sells the hit.
+            self.freeGagReactionTrack = Sequence(
+                ActorInterval(self, 'flail', duration=0.5),
+                Func(self.loop, 'neutral'),
+                name=self.uniqueName('freeGagReactionFallback'))
+            self.freeGagReactionTrack.start()
 
     def getDialogueArray(self, *args):
         return Suit.Suit.getDialogueArray(self, *args)

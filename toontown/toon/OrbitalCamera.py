@@ -1,510 +1,137 @@
-from panda3d.core import (BitMask32, CollisionHandlerFloor,
-                          CollisionHandlerQueue, CollisionNode, CollisionRay,
-                          CollisionSegment, CollisionTraverser, NodePath,
-                          Vec3, WindowProperties)
+"""Mouse-locked Source-style camera used by the local Toon."""
+
+import math
+
+from panda3d.core import (BitMask32, CollisionNode, CollisionSegment,
+                          CollisionTraverser, CollisionHandlerQueue, LineSegs,
+                          NodePath, Point3, Vec3, WindowProperties)
 from direct.directnotify import DirectNotifyGlobal
 from direct.fsm.FSM import FSM
 from direct.showbase.InputStateGlobal import inputState
-from direct.showbase.PythonUtil import fitSrcAngle2Dest, lerp, reduceAngle
 from direct.task import Task
 from direct.task.TaskManagerGlobal import taskMgr
 
 from otp.otpbase import OTPGlobals
-from toontown.toon.CamRunner import CamRunner
 from toontown.toon.ParamObj import ParamObj
+from toontown.toon.GagViewModel import GagViewModel
 
 
 class OrbitalCamera(FSM, NodePath, ParamObj):
+    """True first person with a right-shoulder, Fortnite-like third person."""
+
     notify = DirectNotifyGlobal.directNotify.newCategory("OrbitalCamera")
 
     class ParamSet(ParamObj.ParamSet):
-        Params = {"camOffset": Vec3(0, -9, 5.5)}
+        Params = {"camOffset": Vec3(2.75, -12.0, 1.35)}
 
-    UpdateTaskName = "OrbitCamUpdateTask"
-    ReadMouseTaskName = "OrbitCamReadMouseTask"
-    CollisionCheckTaskName = "OrbitCamCollisionTask"
-    MinP = -50
-    MaxP = 20
-    baseH = None
-    minH = None
-    maxH = None
-    presets = [[-9, 0, 0], [-24, 0, -10], [-12, 0, -15]]
-
-    TopNodeName = "OrbitCam"
+    UpdateTaskName = "SourceCameraUpdateTask"
+    ReadMouseTaskName = "SourceCameraReadMouseTask"
+    CollisionCheckTaskName = "SourceCameraCollisionTask"
+    TopNodeName = "SourceCamera"
+    MinP = -80.0
+    MaxP = 80.0
+    MinDistance = 4.0
+    MaxDistance = 22.0
+    ShoulderOffset = 2.75
+    ShoulderHeight = 1.35
+    SourceFov = 90.0
 
     def __init__(self, subject):
         ParamObj.__init__(self)
         NodePath.__init__(self, self.TopNodeName)
         FSM.__init__(self, "OrbitalCamera")
-
-        self.mouseControl = False
-        self.mouseDelta = (0, 0)
-        self.lastMousePos = (0, 0)
-        self.origMousePos = (0, 0)
-        self.request("Off")
-        self.__inputEnabled = False
         self.subject = subject
-        self.mouseX = 0.0
-        self.mouseY = 0.0
-        self._paramStack = []
         self.setDefaultParams()
-        self.presetPos = 0
-        self.collisionTaskCount = 0
-        self._rmbToken = inputState.watchWithModifiers("RMB", "mouse3")
-        self.initializeCollisions()
-        self.firstPerson = False
-        self.ignoreRMB = False
-        self.runner = CamRunner()
+        self.firstPerson = True
+        self.mouseControl = False
+        self.ignoreRMB = True
         self.cam_toggled = False
+        self.viewYaw = subject.getH(render)
+        self.viewPitch = 0.0
+        self.distance = 12.0
+        self.presetPos = 0
+        self.mouseDelta = (0.0, 0.0)
+        self.origMousePos = (0, 0)
+        self._rmbToken = inputState.watchWithModifiers("RMB", "mouse3")
+        self._cameraCollision = None
+        self._cameraCollisionNode = None
+        self._cameraCollisionNp = None
+        self._cameraQueue = None
+        self._cameraTrav = None
+        self._savedFov = None
+        self._crosshair = None
+        self._shake = 0.0
+        self._followErrorReported = False
+        self.gagViewModel = GagViewModel(camera, subject)
+        self.request("Off")
 
     def destroy(self):
-        self.destroyCollisions()
+        self.stop()
         self._rmbToken.release()
-        del self._rmbToken
-        del self.subject
-        FSM.cleanup(self)
-        NodePath.removeNode(self)
-        ParamObj.destroy(self)
+        self._destroyCollision()
+        self.gagViewModel.destroy()
+        self.gagViewModel = None
+        self._destroyCrosshair()
         self.ignoreAll()
-    
-    def initializeCollisions(self):
-        self.cTravOnFloor = CollisionTraverser("CamMode.cTravOnFloor")
-        self.camFloorRayNode = self.attachNewNode("camFloorRayNode")
-        self.ccRay2 = CollisionRay(0.0, 0.0, 0.0, 0.0, 0.0, -1.0)
-        self.ccRay2Node = CollisionNode("ccRay2Node")
-        self.ccRay2Node.addSolid(self.ccRay2)
-        self.ccRay2NodePath = self.camFloorRayNode.attachNewNode(self.ccRay2Node)
-        self.ccRay2BitMask = OTPGlobals.FloorBitmask
-        self.ccRay2Node.setFromCollideMask(self.ccRay2BitMask)
-        self.ccRay2Node.setIntoCollideMask(BitMask32.allOff())
-        self.ccRay2MoveNodePath = hidden.attachNewNode("ccRay2MoveNode")
-        self.camFloorCollisionBroadcaster = CollisionHandlerFloor()
-        self.camFloorCollisionBroadcaster.setInPattern("zone_on-floor")
-        self.camFloorCollisionBroadcaster.setOutPattern("zone_off-floor")
-        self.camFloorCollisionBroadcaster.addCollider(
-            self.ccRay2NodePath, self.ccRay2MoveNodePath
-        )
-        self.cTravOnFloor.addCollider(
-            self.ccRay2NodePath, self.camFloorCollisionBroadcaster
-        )
-    
-    def destroyCollisions(self):
-        del self.cTravOnFloor
-        del self.ccRay2
-        del self.ccRay2Node
-        self.ccRay2NodePath.remove_node()
-        del self.ccRay2NodePath
-        self.ccRay2MoveNodePath.remove_node()
-        del self.ccRay2MoveNodePath
-        self.camFloorRayNode.remove_node()
-        del self.camFloorRayNode
+        if not self.isEmpty():
+            self.removeNode()
+        self.subject = None
+        FSM.cleanup(self)
+        ParamObj.destroy(self)
+
+    def getViewYaw(self):
+        return self.viewYaw
 
     def enterActive(self):
-        if self.cam_toggled:
-            self.cam_toggled = False
-        else:
-            self.cam_toggled = True
-        self.enableInput()
-
-        base.camNode.setLodCenter(self.subject)
-
-        self._initMaxDistance()
-        self._startCollisionCheck()
-        if not self.firstPerson:
-            self.acceptWheel()
-        self.acceptTab()
-        self.reparentTo(self.subject)
-        base.camera.reparentTo(self)
-        self.setPos(0, 0, self.subject.getHeight())
-        camera.setPosHpr(self.camOffset[0], self.camOffset[1], 10, 0, 0, 0)
-
-    def _initMaxDistance(self):
-        self._maxDistance = abs(self.camOffset[1])
-
-    def exitActive(self):
-        self._stopCollisionCheck()
-        base.camNode.setLodCenter(NodePath())
-        self.ignoreWheel()
-        self.ignoreTab()
-
-        self.disableInput()
-
-    def enableMouseControl(self, pressed, toggle=False):
-        if not toggle:
-            if not pressed or self.ignoreRMB:
-                return
-
-        if not base.CAM_TOGGLE_LOCK:
-            self.ignore("InputState-RMB")
-            self.accept("InputState-RMB", self.disableMouseControl)
-        else:
-            self.ignore("InputState-RMB")
-            self.accept("InputState-RMB", self.toggleMouseControl)
-
-        if self.oobeEnabled():
-            return
-
-        self.mouseControl = True
-        mouseData = base.win.getPointer(0)
-        self.origMousePos = (mouseData.getX(), mouseData.getY())
-
-        base.win.movePointer(0, base.win.getXSize() // 2, base.win.getYSize() // 2)
-        self.lastMousePos = (base.win.getXSize() / 2, base.win.getYSize() / 2)
-
-        if self.getCurrentOrNextState() == "Active":
-            self._startMouseControlTasks()
-        
-        self.setCursor(True)
-        self.runner.startInput()
-
-        self.subject.controlManager.setTurn(0)
-
-    def toggleMouseControl(self, pressed):
-        if pressed and not self.mouseControl:
-            self.enableMouseControl(True, False)
-        elif pressed and self.mouseControl:
-            self.disableMouseControl(True, True)
-
-    def disableMouseControl(self, pressed, disabledByMouse=True):
-        if not base.CAM_TOGGLE_LOCK:
-            self.ignore("InputState-RMB")
-            self.accept("InputState-RMB", self.enableMouseControl)
-        else:
-            self.ignore("InputState-RMB")
-            self.accept("InputState-RMB", self.toggleMouseControl)
-
-        if self.oobeEnabled():
-            return
-
-        if self.mouseControl:
-            self.mouseControl = False
-            self._stopMouseControlTasks()
-
-            base.win.movePointer(
-                0, int(self.origMousePos[0]), int(self.origMousePos[1])
-            )
-
-            base.win.movePointer(
-                0, int(self.origMousePos[0]), int(self.origMousePos[1])
-            )
-            self.setCursor(False)
-            self.runner.stopInput()
-
-        self.subject.controlManager.setTurn(1)
-    
-    def setCursor(self, cursor):
-        wp = WindowProperties()
-        wp.setCursorHidden(cursor)
-        base.win.requestProperties(wp)
-
-    def enableInput(self):
-        self.__inputEnabled = True
-        self.accept("InputState-RMB", self.enableMouseControl)
-        if inputState.isSet("RMB"):
-            self.enableMouseControl(True)
-
-    def disableInput(self):
-        self.__inputEnabled = False
-        self.disableMouseControl(False, False)
-        self.ignore("InputState-RMB")
-
-    def isInputEnabled(self):
-        return self.__inputEnabled
-
-    def isSubjectMoving(self):
-        return any([inputState.isSet(movement) for movement in 
-                    ("forward", "reverse", "turnRight", "turnLeft", "slideRight", "slideLeft")])
-
-    def _avatarFacingTask(self, task):
-        if self.oobeEnabled():
-            return task.cont
-
-        if self.isSubjectMoving():  # or self.subject.isAimingPie:
-            camH = self.getH(render)
-            subjectH = self.subject.getH(render)
-            if abs(camH - subjectH) > 0.01:
-                self.subject.setH(render, camH)
-                self.setH(0)
-        return task.cont
-
-    def _mouseUpdateTask(self, task):
-        if self.oobeEnabled():
-            return task.cont
-
-        subjectMoving = self.isSubjectMoving()
-        subjectTurning = subjectMoving
-
-        if subjectMoving:  # or self.subject.isAimingPie:
-            hNode = self.subject
-        else:
-            hNode = self
-        
-        camSensitivityX = base.settings.get("camSensitivityX")
-        camSensitivityY = base.settings.get("camSensitivityY")
-
-        if self.mouseDelta[0] or self.mouseDelta[1]:
-            (dx, dy) = self.mouseDelta
-            if subjectTurning:
-                dx = +dx
-            hNode.setH(hNode, -dx * camSensitivityX)
-            curP = self.getP()
-            newP = curP + -dy * camSensitivityY
-            newP = min(max(newP, self.MinP), self.MaxP)
-            self.setP(newP)
-            if self.baseH:
-                self._checkHBounds(hNode)
-
-            self.setR(render, 0)
-
-        return task.cont
-
-    def _checkHBounds(self, hNode):
-        currH = fitSrcAngle2Dest(hNode.getH(), 180)
-        if currH < self.minH:
-            hNode.setH(reduceAngle(self.minH))
-        elif currH > self.maxH:
-            hNode.setH(reduceAngle(self.maxH))
-
-    def acceptWheel(self):
+        self.cam_toggled = True
+        self.reparentTo(render)
+        self._startCollision()
+        self.accept("tab", self.toggleFirstPerson)
         self.accept("wheel_up", self._handleWheelUp)
         self.accept("wheel_down", self._handleWheelDown)
         self.accept("page_up", self._handleWheelUp)
         self.accept("page_down", self._handleWheelDown)
-        self._resetWheel()
+        self.accept("mouse1", self._pressTrigger)
+        self.accept("mouse1-up", self._releaseTrigger)
+        self.accept("1", self._selectSlot, [0])
+        self.accept("2", self._selectSlot, [1])
+        self.accept("3", self._selectSlot, [2])
+        self._startMouseControl()
+        self._setCursorHidden(True)
+        self._savedFov = base.camLens.getFov()
+        base.camLens.setFov(self.SourceFov)
+        self._createCrosshair()
+        self.gagViewModel.setVisible(self.firstPerson)
+        self.subject.controlManager.setTurn(0)
+        # GravityWalker runs at priority 25.  Update the view basis after the
+        # movement step so the camera follows the new avatar position, while
+        # mouse sampling itself happens before movement for the same frame.
+        taskMgr.add(self._followTask, self.UpdateTaskName, priority=30)
 
-    def ignoreWheel(self):
+    def exitActive(self):
+        taskMgr.remove(self.UpdateTaskName)
+        self._stopMouseControl()
+        self._destroyCollision()
+        self.ignore("tab")
         self.ignore("wheel_up")
         self.ignore("wheel_down")
         self.ignore("page_up")
         self.ignore("page_down")
-        self._resetWheel()
-    
-    def acceptTab(self):
-        self.accept("tab", self.toggleFirstPerson)
-    
-    def ignoreTab(self):
-        self.ignore("tab")
-    
-    def toggleFirstPerson(self):
-        # self.firstPerson = not self.firstPerson
-        # if self.firstPerson:
-        #     self._handleSetWheel(0)
-        #     self.ignoreWheel()
-        #     # self.enableMouseControl(True)
-        #     # self.ignore("InputState-RMB")
-        # else:
-        #     self.setPresetPos(0, transition=False)
-        #     self.acceptWheel()
-        #     # self.disableMouseControl(True)
-        self.presetPos += 1
-        if self.presetPos >= len(self.presets):
-            self.presetPos = 0
-        self.setPresetPos(self.presetPos)
-    
-    def _handleSetWheel(self, y):
-        self._collSolid.setPointB(0, y + 1, 0)
-        self.camOffset.setY(y)
-        t = (-14 - y) / -12
-        height = self.subject.getHeight()
-        z = lerp(height, height, t)
-        self.setZ(z)
-
-    def _handleWheelUp(self):
-        y = max(-25, min(-2, self.camOffset[1] + 1.0))
-        self._handleSetWheel(y)
-
-    def _handleWheelDown(self):
-        y = max(-25, min(-2, self.camOffset[1] - 1.0))
-        self._handleSetWheel(y)
-
-    def _resetWheel(self):
-        if not self.isActive():
-            return
-
-        self.camOffset = Vec3(0, -14, 5.5)
-        y = self.camOffset[1]
-        z = self.camOffset[2]
-        self._collSolid.setPointB(0, y + 1, 0)
-        self.setZ(z)
-
-    def getCamOffset(self):
-        return self.camOffset
-
-    def setCamOffset(self, camOffset):
-        self.camOffset = Vec3(camOffset)
-
-    def applyCamOffset(self):
-        if self.isActive():
-            camera.setPos(self.camOffset)
-
-    def _setCamDistance(self, distance):
-        offset = camera.getPos(self)
-        offset.normalize()
-        camera.setPos(self, offset * distance)
-
-    def _getCamDistance(self):
-        return camera.getPos(self).length()
-
-    def _startCollisionCheck(self):
-        self._collSolid = CollisionSegment(0, 0, 0, 0, -(self._maxDistance + 1.0), 0)
-        collSolidNode = CollisionNode("OrbitCam.CollSolid")
-        collSolidNode.addSolid(self._collSolid)
-        collSolidNode.setFromCollideMask(
-            OTPGlobals.CameraBitmask
-            | OTPGlobals.CameraTransparentBitmask
-            | OTPGlobals.FloorBitmask
-        )
-        collSolidNode.setIntoCollideMask(BitMask32.allOff())
-        self._collSolidNp = self.attachNewNode(collSolidNode)
-        self._cHandlerQueue = CollisionHandlerQueue()
-        self._cTrav = CollisionTraverser("OrbitCam.cTrav")
-        self._cTrav.addCollider(self._collSolidNp, self._cHandlerQueue)
-        taskMgr.add(
-            self._collisionCheckTask, OrbitalCamera.CollisionCheckTaskName, priority=45
-        )
-
-    def _collisionCheckTask(self, task=None):
-        self.collisionTaskCount = (self.collisionTaskCount + 1) % 5
-
-        if self.oobeEnabled():
-            return Task.cont
-
-        self._cTrav.traverse(self.subject.getGeom())
-
-        if self.firstPerson or self.subject.isDisguised:
-            self.subject.getGeomNode().hide()
-        else:
-            self.subject.getGeomNode().show()
-
-        if self._cHandlerQueue.getNumEntries() == 0:
-            for i in range(self._cHandlerQueue.getNumEntries()):
-                if not self._cHandlerQueue.getEntry(i).hasSurfacePoint():
-                    return Task.cont
-
-        self._cHandlerQueue.sortEntries()
-
-        cNormal = (0, -1, 0)
-        collEntry = None
-        numEntries = self._cHandlerQueue.getNumEntries()
-
-        if numEntries > 0:
-            collEntry = self._cHandlerQueue.getEntry(0)
-            cNormal = collEntry.getSurfaceNormal(self)
-
-        if not (collEntry and collEntry.hasSurfacePoint()):
-            camera.setPos(self.camOffset)
-            camera.setZ(0)
-
-            if not self.firstPerson:
-                if self.subject.isDisguised:
-                    self.subject.getGeomNode().hide()
-                else:
-                    self.subject.getGeomNode().show()
-
-            return task.cont
-
-        cPoint = collEntry.getSurfacePoint(self)
-        offset = 0.9
-        camera.setPos(cPoint + cNormal * offset)
-        distance = camera.getDistance(self)
-        if not self.firstPerson:
-            if distance < 1.8 or self.subject.isDisguised:
-                self.subject.getGeomNode().hide()
-            else:
-                self.subject.getGeomNode().show()
-        self.subject.ccPusherTrav.traverse(render)
-        return Task.cont
-
-    def _stopCollisionCheck(self):
-        taskMgr.remove(OrbitalCamera.CollisionCheckTaskName)
-        self._cTrav.removeCollider(self._collSolidNp)
-        del self._cHandlerQueue
-        del self._cTrav
-        self._collSolidNp.detachNode()
-        del self._collSolidNp
-        if self.subject:
-            if self.subject.isDisguised:
-                self.subject.getGeomNode().hide()
-            else:
-                self.subject.getGeomNode().show()
-
-    def setPresetPos(self, presetIndex, transition=True):
-        self.presetPos = presetIndex
-
-        self.setCameraPos(
-            self.presets[self.presetPos][0],
-            self.presets[self.presetPos][1],
-            self.presets[self.presetPos][2],
-            transition=transition,
-        )
-
-    def setCameraPos(self, y, h, p, transition=True):
-        t = (-14 - y) / -12
-        z = lerp(self.subject.getHeight(), self.subject.getHeight(), t)
-        self._collSolid.setPointB(0, y + 1, 0)
-        self.camOffset.setY(y)
-        self.setPos(self.getX(), self.getY(), z)
-        self.setHpr(h, p, 0)
-
-    def _startMouseControlTasks(self):
-        if self.mouseControl:
-            properties = WindowProperties()
-            base.win.requestProperties(properties)
-            self._startMouseReadTask()
-            self._startMouseUpdateTask()
-
-    def _stopMouseControlTasks(self):
-        properties = WindowProperties()
-        properties.setMouseMode(properties.MAbsolute)
-        base.win.requestProperties(properties)
-        self._stopMouseReadTask()
-        self._stopMouseUpdateTask()
-
-    def _startMouseReadTask(self):
-        self._stopMouseReadTask()
-        taskMgr.add(
-            self._mouseReadTask, self.TopNodeName + "-MouseRead", priority=-29
-        )
-
-    def _mouseReadTask(self, task):
-        if (self.oobeEnabled()) or not base.mouseWatcherNode.hasMouse():
-            self.mouseDelta = (0, 0)
-        else:
-            winSize = (base.win.getXSize(), base.win.getYSize())
-            mouseData = base.win.getPointer(0)
-            if mouseData.getX() > winSize[0] or mouseData.getY() > winSize[1]:
-                self.mouseDelta = (0, 0)
-            else:
-                self.mouseDelta = (
-                    mouseData.getX() - self.lastMousePos[0],
-                    mouseData.getY() - self.lastMousePos[1],
-                )
-                base.win.movePointer(0, winSize[0] // 2, winSize[1] // 2)
-
-                mouseData = base.win.getPointer(0)
-                self.lastMousePos = (mouseData.getX(), mouseData.getY())
-
-        return task.cont
-
-    def _stopMouseReadTask(self):
-        taskMgr.remove(self.TopNodeName + "-MouseRead")
-
-    def _startMouseUpdateTask(self):
-        self._stopMouseUpdateTask()
-        taskMgr.add(
-            self._avatarFacingTask,
-            self.TopNodeName + "-AvatarFacing",
-            priority=23,
-        )
-        taskMgr.add(
-            self._mouseUpdateTask,
-            self.TopNodeName + "-MouseUpdate",
-            priority=40,
-        )
-
-    def _stopMouseUpdateTask(self):
-        taskMgr.remove(self.TopNodeName + "-MouseUpdate")
-        taskMgr.remove(self.TopNodeName + "-AvatarFacing")
+        self.ignore("mouse1")
+        self.ignore("mouse1-up")
+        self.ignore("1")
+        self.ignore("2")
+        self.ignore("3")
+        self._setCursorHidden(False)
+        self.gagViewModel.setTrigger(False)
+        self.gagViewModel.setVisible(False)
+        self._destroyCrosshair()
+        self._showAvatar(True)
+        if self._savedFov is not None:
+            base.camLens.setFov(self._savedFov[0], self._savedFov[1])
+            self._savedFov = None
+        self.subject.controlManager.setTurn(0)
+        self.cam_toggled = False
 
     def start(self):
         if not self.isActive():
@@ -517,6 +144,325 @@ class OrbitalCamera(FSM, NodePath, ParamObj):
 
     def isActive(self):
         return self.state == "Active"
-    
+
+    def _setCursorHidden(self, hidden):
+        props = WindowProperties()
+        props.setCursorHidden(hidden)
+        base.win.requestProperties(props)
+
+    def _startMouseControl(self):
+        self.mouseControl = True
+        pointer = base.win.getPointer(0)
+        self.origMousePos = (pointer.getX(), pointer.getY())
+        center = (base.win.getXSize() // 2, base.win.getYSize() // 2)
+        base.win.movePointer(0, center[0], center[1])
+        properties = WindowProperties()
+        properties.setMouseMode(WindowProperties.MRelative)
+        base.win.requestProperties(properties)
+        taskMgr.add(self._readMouseTask, self.ReadMouseTaskName, priority=10)
+
+    def _stopMouseControl(self):
+        self.mouseControl = False
+        taskMgr.remove(self.ReadMouseTaskName)
+        properties = WindowProperties()
+        properties.setMouseMode(WindowProperties.MAbsolute)
+        base.win.requestProperties(properties)
+        if hasattr(base, "win") and base.win:
+            base.win.movePointer(0, int(self.origMousePos[0]), int(self.origMousePos[1]))
+
+    def enableMouseControl(self, pressed=True, toggle=False):
+        if self.isActive() and not self.mouseControl:
+            self._startMouseControl()
+            self._setCursorHidden(True)
+
+    def disableMouseControl(self, pressed=True, disabledByMouse=True):
+        if self.mouseControl:
+            self._stopMouseControl()
+            self._setCursorHidden(False)
+
+    def _readMouseTask(self, task):
+        if not self.mouseControl or not base.mouseWatcherNode.hasMouse():
+            self.mouseDelta = (0.0, 0.0)
+            return Task.cont
+        width, height = base.win.getXSize(), base.win.getYSize()
+        pointer = base.win.getPointer(0)
+        dx = pointer.getX() - width // 2
+        dy = pointer.getY() - height // 2
+        base.win.movePointer(0, width // 2, height // 2)
+
+        if dx or dy:
+            sensitivityX = base.settings.get("camSensitivityX") or 0.15
+            sensitivityY = base.settings.get("camSensitivityY") or 0.10
+            self.viewYaw -= dx * sensitivityX
+            self.viewPitch = max(self.MinP, min(self.MaxP,
+                                                 self.viewPitch - dy * sensitivityY))
+        return Task.cont
+
+    def _followTask(self, task):
+        # A transient empty NodePath can happen while the local avatar is
+        # being reparented or regenerated during a zone/state transition.
+        # This task owns the live camera, so returning Task.done here silently
+        # strands the player with a frozen camera while movement/chat continue.
+        if self.subject is None or self.subject.isEmpty():
+            return Task.cont
+
+        try:
+            height = self.subject.getHeight() if hasattr(self.subject, "getHeight") else 2.0
+            crouchScale = 0.72 if getattr(self.subject, 'sourceCrouched', False) else 1.0
+            pivotHeight = height * 0.52 * crouchScale
+            eyeHeight = height * 0.82 * crouchScale
+            self.setPos(self.subject.getPos(render) + Vec3(0, 0, pivotHeight))
+            self.setHpr(self.viewYaw, self.viewPitch, 0)
+
+            if self.firstPerson:
+                # Other gameplay movies can temporarily reparent the global
+                # camera. Reclaim it on the next normal gameplay frame.
+                camera.reparentTo(self)
+                camera.setPos(0, 0, eyeHeight - pivotHeight)
+                camera.setHpr(0, 0, 0)
+                self._applyShake()
+                self._showAvatar(False)
+                self.subject.updateSourceHeadFacing(self.viewYaw)
+                self.subject.setSourceBodyHeading(self.viewYaw)
+            else:
+                self._updateThirdPersonCamera()
+                self.subject.updateSourceHeadFacing(self.viewYaw)
+            overlayVisible = self.firstPerson and self._isFreeRoamView()
+            self._setCrosshairVisible(overlayVisible)
+            self.gagViewModel.setVisible(overlayVisible)
+            self._followErrorReported = False
+        except Exception:
+            # A bad frame must not remove the only camera update task. Keep
+            # it alive and report the first failure for the next log.
+            if not self._followErrorReported:
+                self.notify.warning('Camera follow update failed; retrying next frame')
+                import traceback
+                traceback.print_exc()
+                self._followErrorReported = True
+        return Task.cont
+
+    def _isFreeRoamView(self):
+        playGame = getattr(getattr(base, 'cr', None), 'playGame', None)
+        place = getattr(playGame, 'place', None)
+        if place is None and playGame is not None:
+            place = playGame.getPlace()
+        if place is None or not hasattr(place, 'getState'):
+            return True
+        return place.getState() in ('walk', 'start', 'quietZone')
+
+    def _pressTrigger(self):
+        if self.firstPerson and self._isFreeRoamView():
+            self.gagViewModel.setTrigger(True)
+
+    def _releaseTrigger(self):
+        self.gagViewModel.setTrigger(False)
+
+    def _selectSlot(self, slotIndex):
+        if self.firstPerson:
+            self.gagViewModel.select(slotIndex)
+
+    def addShake(self, strength):
+        """Kick the first-person camera; decays over the next few frames."""
+        self._shake = min(1.5, self._shake + max(0.0, strength))
+
+    def _applyShake(self):
+        if self._shake <= 0.001:
+            return
+        dt = max(0.0, min(0.1, globalClock.getDt()))
+        amount = self._shake
+        angle = globalClock.getFrameTime() * 47.0
+        camera.setHpr(math.sin(angle) * 2.2 * amount, math.cos(angle * 1.3) * 1.6 * amount,
+                      math.sin(angle * 0.7) * 1.1 * amount)
+        self._shake = max(0.0, self._shake - dt * 4.5)
+
+    def _createCrosshair(self):
+        if self._crosshair:
+            self._setCrosshairVisible(self.firstPerson)
+            return
+        lines = LineSegs('FirstPersonCrosshair')
+        lines.setThickness(2.0)
+        lines.setColor(1.0, 1.0, 1.0, 0.9)
+        lines.moveTo(-0.018, 0.0, 0.0)
+        lines.drawTo(-0.005, 0.0, 0.0)
+        lines.moveTo(0.005, 0.0, 0.0)
+        lines.drawTo(0.018, 0.0, 0.0)
+        lines.moveTo(0.0, -0.018, 0.0)
+        lines.drawTo(0.0, -0.005, 0.0)
+        lines.moveTo(0.0, 0.005, 0.0)
+        lines.drawTo(0.0, 0.018, 0.0)
+        self._crosshair = base.aspect2d.attachNewNode(lines.create())
+        self._crosshair.setBin('fixed', 100)
+        self._crosshair.setDepthTest(False)
+        self._crosshair.setDepthWrite(False)
+        self._setCrosshairVisible(self.firstPerson)
+
+    def _setCrosshairVisible(self, visible):
+        if self._crosshair:
+            if visible:
+                self._crosshair.show()
+            else:
+                self._crosshair.hide()
+
+    def _destroyCrosshair(self):
+        if self._crosshair:
+            self._crosshair.removeNode()
+            self._crosshair = None
+
+    def _startCollision(self):
+        self._cameraCollision = CollisionSegment(0, 0, 0,
+                                                  self.ShoulderOffset,
+                                                  -self.distance,
+                                                  self.ShoulderHeight)
+        self._cameraCollisionNode = CollisionNode("SourceCameraCollision")
+        self._cameraCollisionNode.addSolid(self._cameraCollision)
+        self._cameraCollisionNode.setFromCollideMask(
+            OTPGlobals.CameraBitmask | OTPGlobals.CameraTransparentBitmask |
+            OTPGlobals.FloorBitmask)
+        self._cameraCollisionNode.setIntoCollideMask(BitMask32.allOff())
+        self._cameraCollisionNp = self.attachNewNode(self._cameraCollisionNode)
+        self._cameraQueue = CollisionHandlerQueue()
+        self._cameraTrav = CollisionTraverser("SourceCameraTraverser")
+        self._cameraTrav.addCollider(self._cameraCollisionNp, self._cameraQueue)
+        taskMgr.add(self._collisionTask, self.CollisionCheckTaskName, priority=45)
+
+    def _destroyCollision(self):
+        taskMgr.remove(self.CollisionCheckTaskName)
+        if self._cameraTrav and self._cameraCollisionNp:
+            self._cameraTrav.removeCollider(self._cameraCollisionNp)
+        if self._cameraCollisionNp:
+            self._cameraCollisionNp.removeNode()
+        self._cameraCollision = None
+        self._cameraCollisionNode = None
+        self._cameraCollisionNp = None
+        self._cameraQueue = None
+        self._cameraTrav = None
+
+    def _collisionTask(self, task):
+        if self.firstPerson or not self._cameraTrav:
+            self._showAvatar(False)
+            return Task.cont
+        crouchScale = 0.72 if getattr(self.subject, 'sourceCrouched', False) else 1.0
+        desired = Point3(self.ShoulderOffset,
+                         -self.distance,
+                         self.ShoulderHeight * crouchScale)
+        self._cameraCollision.setPointB(desired)
+        self._cameraTrav.traverse(render)
+        cameraPos = desired
+        if self._cameraQueue.getNumEntries():
+            self._cameraQueue.sortEntries()
+            entry = self._cameraQueue.getEntry(0)
+            if entry.hasSurfacePoint():
+                cameraPos = entry.getSurfacePoint(self) + entry.getSurfaceNormal(self) * 0.35
+        camera.reparentTo(self)
+        camera.setPos(cameraPos)
+        camera.lookAt(self, 0, 0, 0.35 * crouchScale)
+        self._showAvatar(True)
+        return Task.cont
+
+    def _updateThirdPersonCamera(self):
+        self._showAvatar(True)
+
+    def _showAvatar(self, visible):
+        geom = self.subject.getGeomNode()
+        if self.subject.isDisguised or not visible:
+            if self.firstPerson and not self.subject.isDisguised:
+                # Keep the animated torso in the camera view so the Toon arms
+                # and hands remain visible with the gag prop.  The head and
+                # legs are hidden to avoid seeing the avatar from inside it.
+                geom.show()
+                self._setAvatarPartVisible('head', False)
+                self._setAvatarPartVisible('legs', False)
+                self._setAvatarPartVisible('torso', True)
+            else:
+                geom.hide()
+        else:
+            geom.show()
+            self._setAvatarPartVisible('head', True)
+            self._setAvatarPartVisible('legs', True)
+            self._setAvatarPartVisible('torso', True)
+
+    def _subjectPart(self, partName):
+        """Return one of the subject's parts under a LOD name it really has.
+
+        ``Actor.getPart`` defaults to a LOD called ``lodRoot``, which only
+        exists on single-LOD models.  Toons keep their parts under numbered
+        LODs, so asking for the default silently returns None *and* logs
+        ``no lod named: lodRoot`` -- and this runs every frame.
+        """
+        lodNames = self.subject.getLODNames()
+        if lodNames:
+            return self.subject.getPart(partName, lodNames[0])
+        # A partially generated or single-geometry Actor may have no named
+        # LOD at all.  Calling Actor.getPart without a real LOD makes Panda
+        # spam "no lod named: lodRoot" every frame; a normal scene-graph
+        # lookup is quiet and still finds the part when it exists.
+        return self.subject.find('**/%s' % partName)
+
+    def _setAvatarPartVisible(self, partName, visible):
+        """Apply a part visibility change when the Toon has generated it."""
+        part = self._subjectPart(partName)
+        if part is None or part.isEmpty():
+            return
+        if visible:
+            part.show()
+        else:
+            part.hide()
+
+    def toggleFirstPerson(self):
+        self.firstPerson = not self.firstPerson
+        self._showAvatar(not self.firstPerson)
+        overlayVisible = self.firstPerson and self._isFreeRoamView()
+        self._setCrosshairVisible(overlayVisible)
+        self.gagViewModel.setVisible(overlayVisible)
+
+    def _handleWheelUp(self):
+        if self.firstPerson:
+            self.gagViewModel.cycle(-1)
+        else:
+            self.distance = max(self.MinDistance, self.distance - 0.75)
+
+    def _handleWheelDown(self):
+        if self.firstPerson:
+            self.gagViewModel.cycle(1)
+        else:
+            self.distance = min(self.MaxDistance, self.distance + 0.75)
+
+    def acceptWheel(self):
+        self.accept("wheel_up", self._handleWheelUp)
+        self.accept("wheel_down", self._handleWheelDown)
+
+    def ignoreWheel(self):
+        self.ignore("wheel_up")
+        self.ignore("wheel_down")
+
+    def acceptTab(self):
+        self.accept("tab", self.toggleFirstPerson)
+
+    def ignoreTab(self):
+        self.ignore("tab")
+
+    def getCamOffset(self):
+        return Vec3(self.ShoulderOffset, -self.distance, self.ShoulderHeight)
+
+    def setCamOffset(self, camOffset):
+        self.ShoulderOffset = float(camOffset[0])
+        self.distance = max(self.MinDistance, min(self.MaxDistance, abs(float(camOffset[1]))))
+        self.ShoulderHeight = float(camOffset[2])
+
+    def applyCamOffset(self):
+        pass
+
+    def setPresetPos(self, presetIndex, transition=True):
+        self.presetPos = presetIndex
+        self.distance = (12.0, 18.0, 7.0)[presetIndex % 3]
+
+    def setCameraPos(self, y, h, p, transition=True):
+        self.viewYaw = h
+        self.viewPitch = p
+        self.distance = max(self.MinDistance, min(self.MaxDistance, abs(y)))
+
+    def getCurrentOrNextState(self):
+        return self.state
+
     def oobeEnabled(self):
         return hasattr(base, "oobeMode") and base.oobeMode

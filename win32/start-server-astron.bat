@@ -1,5 +1,5 @@
 @echo off
-title Super CFO: Astron Launcher
+title Toontown Apocalypse: Astron Launcher
 cd ..\astron
 
 :main

@@ -71,6 +71,7 @@ class DistributedBuilding(DistributedObject.DistributedObject):
         self.toonGrowSound = None
         self.toonSettleSound = None
         self.block = None
+        self.actionBuilding = False
         return
 
     def generate(self):
@@ -118,6 +119,9 @@ class DistributedBuilding(DistributedObject.DistributedObject):
         self.difficulty = difficulty
         self.numFloors = numFloors
 
+    def setActionBuilding(self, enabled):
+        self.actionBuilding = bool(enabled)
+
     def setState(self, state, timestamp):
         self.fsm.request(state, [globalClockDelta.localElapsedTime(timestamp)])
 
@@ -157,6 +161,13 @@ class DistributedBuilding(DistributedObject.DistributedObject):
         pass
 
     def enterWaitForVictors(self, ts):
+        if self.actionBuilding:
+            # The return trip is gameplay, not a victory movie.  The player
+            # boards the exterior elevator normally; this state only keeps
+            # the building alive until the elevator doors finish closing.
+            self.acceptOnce('insideVictorElevator', self.handleInsideVictorElevator)
+            closeDoors(self.leftDoor, self.rightDoor)
+            return
         if self.mode != 'suit':
             self.setToSuit()
         victorCount = self.victorList.count(base.localAvatar.doId)

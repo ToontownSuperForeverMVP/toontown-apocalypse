@@ -29,6 +29,7 @@ class DistributedSuitInterior(DistributedObject.DistributedObject):
         self.elevatorName = self.__uniqueName('elevator')
         self.floorModel = None
         self.elevatorOutOpen = 0
+        self.actionBuilding = False
         self.BottomFloor_SuitPositions = [Point3(0, 15, 0),
          Point3(10, 20, 0),
          Point3(-7, 24, 0),
@@ -178,6 +179,9 @@ class DistributedSuitInterior(DistributedObject.DistributedObject):
     def setNumFloors(self, numFloors):
         self.numFloors = numFloors
 
+    def setActionBuilding(self, enabled):
+        self.actionBuilding = bool(enabled)
+
     def setToons(self, toonIds, hack):
         self.toonIds = toonIds
         oldtoons = self.toons
@@ -227,6 +231,13 @@ class DistributedSuitInterior(DistributedObject.DistributedObject):
 
     def setState(self, state, timestamp):
         self.fsm.request(state, [globalClockDelta.localElapsedTime(timestamp)])
+        if self.actionBuilding and state in ('Battle', 'Resting', 'Reward'):
+            # The classic interior state machine used to hand control to
+            # TownBattle here.  Action floors stay in the room so movement,
+            # aiming, and the elevator trigger remain live.
+            place = base.cr.playGame.getPlace()
+            if place is not None and place.fsm.getCurrentState().getName() != 'walk':
+                place.setState('walk')
 
     def d_elevatorDone(self):
         self.sendUpdate('elevatorDone', [])
@@ -247,6 +258,9 @@ class DistributedSuitInterior(DistributedObject.DistributedObject):
         return None
 
     def __playElevator(self, ts, name, callback):
+        if self.actionBuilding:
+            self.__playActionElevator(ts, name, callback)
+            return
         SuitHs = []
         SuitPositions = []
         self.battleMusic = f'suit-building-{(self.currentFloor + 1)}'
@@ -304,6 +318,48 @@ class DistributedSuitInterior(DistributedObject.DistributedObject):
 
         self.activeIntervals[name] = track
         return
+
+    def __playActionElevator(self, ts, name, callback):
+        """Load a room and open its doors without riding/camera tracks."""
+        if self.floorModel:
+            self.floorModel.removeNode()
+        if self.currentFloor == 0:
+            self.floorModel = loader.loadModel('phase_7/models/modules/suit_interior')
+            positions, headings = self.BottomFloor_SuitPositions, self.BottomFloor_SuitHs
+        elif self.currentFloor == self.numFloors - 1:
+            self.floorModel = loader.loadModel('phase_7/models/modules/boss_suit_office')
+            positions, headings = self.BossOffice_SuitPositions, self.BossOffice_SuitHs
+        else:
+            self.floorModel = loader.loadModel('phase_7/models/modules/cubicle_room')
+            positions, headings = self.Cubicle_SuitPositions, self.Cubicle_SuitHs
+        self.floorModel.reparentTo(render)
+        elevIn = self.floorModel.find('**/elevator-in')
+        elevOut = self.floorModel.find('**/elevator-out')
+        for index, suit in enumerate(self.suits):
+            if index >= len(positions):
+                break
+            suit.setPos(positions[index])
+            suit.setH(headings[index] if len(self.suits) > 2 else 170)
+            suit.loop('neutral')
+        for toon in self.toons:
+            toon.reparentTo(self.elevatorModelIn)
+            index = self.toonIds.index(toon.doId)
+            toon.setPos(ElevatorPoints[index][0], ElevatorPoints[index][1], ElevatorPoints[index][2])
+            toon.setHpr(180, 0, 0)
+            toon.loop('neutral')
+        self.elevatorModelIn.reparentTo(elevIn)
+        self.elevatorModelOut.reparentTo(elevOut)
+        self.leftDoorIn.setPos(3.5, 0, 0)
+        self.rightDoorIn.setPos(-3.5, 0, 0)
+        self.leftDoorOut.setPos(3.5, 0, 0)
+        self.rightDoorOut.setPos(-3.5, 0, 0)
+        camera.wrtReparentTo(render)
+        track = Sequence(
+            ElevatorUtils.getOpenInterval(self, self.leftDoorIn, self.rightDoorIn,
+                                          self.openSfx, None, type=ELEVATOR_NORMAL),
+            Func(callback), name=name)
+        track.start(ts)
+        self.activeIntervals[name] = track
 
     def enterElevator(self, ts = 0):
         self.currentFloor += 1
@@ -384,6 +440,9 @@ class DistributedSuitInterior(DistributedObject.DistributedObject):
         pass
 
     def enterReward(self, ts = 0):
+        if self.actionBuilding:
+            self.acceptOnce('actionBuildingReturn', self.__handleActionBuildingReturn)
+            return
         base.localAvatar.b_setParent(ToontownGlobals.SPHidden)
         request = {'loader': ZoneUtil.getBranchLoaderName(self.extZoneId),
          'where': ZoneUtil.getToonWhereName(self.extZoneId),
@@ -395,6 +454,17 @@ class DistributedSuitInterior(DistributedObject.DistributedObject):
          'bldgDoId': self.distBldgDoId}
         messenger.send('DSIDoneEvent', [request])
         return
+
+    def __handleActionBuildingReturn(self):
+        request = {'loader': ZoneUtil.getBranchLoaderName(self.extZoneId),
+                   'where': ZoneUtil.getToonWhereName(self.extZoneId),
+                   'how': 'elevatorIn',
+                   'hoodId': ZoneUtil.getHoodId(self.extZoneId),
+                   'zoneId': self.extZoneId,
+                   'shardId': None,
+                   'avId': -1,
+                   'bldgDoId': self.distBldgDoId}
+        messenger.send('DSIDoneEvent', [request])
 
     def exitReward(self):
         return None

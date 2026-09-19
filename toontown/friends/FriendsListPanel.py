@@ -218,6 +218,10 @@ class FriendsListPanel(DirectFrame, StateData.StateData):
         self.__updateTitle()
         self.__updateArrows()
         self.show()
+        # Let other corner-owned HUDs (notably the street contract) get out
+        # of the way even when a panel is opened from an avatar detail panel
+        # instead of through the normal hotkey event.
+        messenger.send('friends-list-shown')
 
         # Accept all events that fire when our friends list changes.
         self.accept(FriendsGlobals.FRIENDS_ONLINE_EVENT, self.__friendOnline)

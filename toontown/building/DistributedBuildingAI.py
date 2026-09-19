@@ -62,6 +62,11 @@ class DistributedBuildingAI(DistributedObjectAI.DistributedObjectAI):
         self.frontDoorPoint = None
         self.suitPlannerExt = None
         self.fSkipElevatorOpening = False
+        self._actionReturnPending = False
+        # Street extraction buildings use the live action combat path.  Keep
+        # this on the building object so both elevator sides can choose the
+        # door-only transition without guessing from the current zone.
+        self.actionBuilding = False
         return
 
     def cleanup(self):
@@ -173,6 +178,9 @@ class DistributedBuildingAI(DistributedObjectAI.DistributedObjectAI):
     def getSuitData(self):
         return [
          ord(self.track), self.difficulty, self.numFloors]
+
+    def getActionBuilding(self):
+        return int(self.actionBuilding)
 
     def getState(self):
         return [
@@ -429,6 +437,10 @@ class DistributedBuildingAI(DistributedObjectAI.DistributedObjectAI):
         return Task.done
 
     def enterToon(self):
+        if self._actionReturnPending and hasattr(self, 'elevator'):
+            self.elevator.requestDelete()
+            del self.elevator
+            self.actionBuilding = False
         self.d_setState('toon')
         exteriorZoneId, interiorZoneId = self.getExteriorAndInteriorZoneId()
         if simbase.config.GetBool('want-new-toonhall', 1) and ZoneUtil.getCanonicalZoneId(interiorZoneId) == ToonHall:
@@ -503,6 +515,8 @@ class DistributedBuildingAI(DistributedObjectAI.DistributedObjectAI):
          ord(self.track), self.difficulty, self.numFloors])
         zoneId, interiorZoneId = self.getExteriorAndInteriorZoneId()
         self.planner = SuitPlannerInteriorAI.SuitPlannerInteriorAI(self.numFloors, self.difficulty, self.track, interiorZoneId)
+        self.actionBuilding = True
+        self.sendUpdate('setActionBuilding', [1])
         self.d_setState('suit')
         exteriorZoneId, interiorZoneId = self.getExteriorAndInteriorZoneId()
         self.elevator = DistributedElevatorExtAI.DistributedElevatorExtAI(self.air, self)
@@ -511,9 +525,23 @@ class DistributedBuildingAI(DistributedObjectAI.DistributedObjectAI):
 
     def exitSuit(self):
         del self.planner
-        if hasattr(self, 'elevator'):
+        if hasattr(self, 'elevator') and not self._actionReturnPending:
             self.elevator.requestDelete()
             del self.elevator
+
+    def actionBuildingReturn(self, toonIds):
+        if not self.actionBuilding or self._actionReturnPending:
+            return
+        self._actionReturnPending = True
+        victorList = list(toonIds)
+        while len(victorList) < 4:
+            victorList.append(None)
+        savedBy = []
+        for toonId in toonIds:
+            toon = self.air.doId2do.get(toonId)
+            if toon is not None:
+                savedBy.append([toonId, toon.getName(), toon.dna.asTuple(), toon.isGM()])
+        self.fsm.request('waitForVictors', [victorList, savedBy])
 
     def enterClearOutToonInteriorForCogdo(self):
         self.d_setState('clearOutToonInteriorForCogdo')
