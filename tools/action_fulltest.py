@@ -45,6 +45,7 @@ from panda3d.toontown import SuitLeg  # noqa: E402
 from toontown.action import ActionGlobals, ActionProgression  # noqa: E402
 from toontown.action.cog import CogAttackRegistry  # noqa: E402
 from toontown.action.cog.CogCombatControllerAI import CogCombatControllerAI  # noqa: E402
+from toontown.action.director.BuildingActionDirectorAI import BuildingActionDirectorAI  # noqa: E402
 from toontown.action.director.PressureDirector import PressureMeter  # noqa: E402
 from toontown.action.director.StreetDirectorAI import StreetDirectorAI  # noqa: E402
 from toontown.action.objectives import ObjectiveGenerator  # noqa: E402
@@ -1202,8 +1203,9 @@ def testControllerPatrolGuards():
     eq(controller.state, ActionGlobals.COG_PATROL, 'no run means no acquisition')
     director.runActive = True
     suit.legType = SuitLeg.TOff
+    director.toons[0].pos = Point3(5, 0, 0)
     controller.tick(0.1, 0.1, profile)
-    eq(controller.state, ActionGlobals.COG_PATROL, 'a non-walking Cog does not acquire')
+    eq(controller.state, ActionGlobals.COG_PATROL, 'a non-walking Cog never self-acquires, even up close')
     suit.legType = SuitLeg.TWalk
     director.toons[0].pos = Point3(1000, 0, 0)
     controller.tick(0.2, 0.1, profile)
@@ -1211,6 +1213,44 @@ def testControllerPatrolGuards():
     director.toons[0].pos = Point3(5, 0, 0)
     controller.tick(0.3, 0.1, profile)
     eq(controller.state, ActionGlobals.COG_ALERT, 'a close Toon is noticed')
+
+
+def testBuildingRoomCogsNeedDirectorAggro():
+    """A planted building Cog fights only when the room director aggro()s it."""
+    profile = ActionGlobals.getDifficultyProfile(5, ActionGlobals.MIN_POWER, 0)
+    controller, suit, toon, director = _makeController(profile=profile)
+    suit.legType = SuitLeg.TOff
+    director.runActive = True
+    director.toons[0].pos = Point3(2, 0, 0)
+    controller.tick(0.0, 0.1, profile)
+    eq(controller.state, ActionGlobals.COG_PATROL, 'planted Cog ignores the closest Toon')
+    controller.aggro(toon, 0.2)
+    check(controller.isEngaged(), 'director aggro engages the room')
+
+
+def testBuildingDirectorFloorScaling():
+    air = FakeAir()
+    planner = FakePlanner(air)
+    interior = type('FakeInterior', (), {'topFloor': 2})()
+    director = BuildingActionDirectorAI(interior, planner)
+    toon = FakeToon(pos=(0, 0, 0), maxHp=50, hp=50)
+    air.doId2do[toon.doId] = toon
+    CLOCK.set(0.0)
+    suit = FakeSuit(planner, level=1, name='f', legType=SuitLeg.TOff)
+    air.doId2do[suit.doId] = suit
+    director.startFloor(1, [toon.doId], [suit], lambda: None)
+    check(director.tier > ActionGlobals.DEFAULT_TIER, 'deeper floors scale the effective tier')
+    check(director.controllers.get(suit.doId) is not None, 'room Cogs are registered with the director')
+    check(controller_engaged(director, suit), 'a room Cog is engaged as the floor opens')
+    director._finishFloor()
+    check(director.floorFinished, 'finishing the floor marks it done')
+    director.stop()
+    check(not director.controllers, 'stopping releases the room controllers')
+
+
+def controller_engaged(director, suit):
+    controller = director.controllers.get(suit.doId)
+    return controller is not None and controller.isEngaged()
 
 
 def testEngageSlotLimit():
@@ -3475,6 +3515,8 @@ TESTS = (
     testControllerMovement,
     testControllerStreaming,
     testControllerPatrolGuards,
+    testBuildingRoomCogsNeedDirectorAggro,
+    testBuildingDirectorFloorScaling,
     testEngageSlotLimit,
     testControllerRetarget,
     testDirectorRunLifecycle,

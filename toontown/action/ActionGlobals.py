@@ -575,6 +575,8 @@ ANNOUNCE_CACHE_SPAWNED = 3
 ANNOUNCE_ELITE_SPAWNED = 4
 ANNOUNCE_KILL_CHAIN = 5
 ANNOUNCE_BREAKTHROUGH = 6
+ANNOUNCE_BUILDING_FLOOR_CLEARED = 7
+ANNOUNCE_BUILDING_EXTRACTED = 8
 
 # Consecutive defeats reward staying in the fight without taking damage.
 KILL_CHAIN_WINDOW = 8.0
@@ -587,6 +589,17 @@ KILL_CHAIN_MAX_BONUS = 0.25
 BREAKTHROUGH_KILLS = 12
 BREAKTHROUGH_BEANS_BASE = 90
 BREAKTHROUGH_PRESSURE_RELIEF = 65.0
+
+# ---------------------------------------------------------------------------
+# Cog buildings (real-time interiors)
+# ---------------------------------------------------------------------------
+# Beans paid by the interior when a non-top floor is cleared (the director
+# adds this on top of the normal per-Cog street rewards).
+BUILDING_FLOOR_CLEAR_BEANS_BASE = 25
+BUILDING_FLOOR_CLEAR_BEANS_PER_FLOOR = 12
+# Bonus for clearing the top-floor office.
+BUILDING_TOP_FLOOR_BONUS_BASE = 60
+BUILDING_TOP_FLOOR_BONUS_PER_FLOOR = 30
 
 
 def clamp(value, low, high):

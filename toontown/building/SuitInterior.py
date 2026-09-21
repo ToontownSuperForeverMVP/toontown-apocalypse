@@ -6,7 +6,6 @@ from direct.showbase import DirectObject
 from direct.fsm import StateData
 from direct.fsm import ClassicFSM, State
 from direct.fsm import State
-from toontown.town import TownBattle
 from toontown.suit import Suit
 from . import Elevator
 from direct.task.Task import Task
@@ -19,8 +18,8 @@ class SuitInterior(Place.Place):
 
     def __init__(self, loader, parentFSM, doneEvent):
         Place.Place.__init__(self, loader, doneEvent)
-        self.fsm = ClassicFSM.ClassicFSM('SuitInterior', [State.State('entrance', self.enterEntrance, self.exitEntrance, ['battle', 'walk']),
-         State.State('Elevator', self.enterElevator, self.exitElevator, ['battle', 'walk']),
+        self.fsm = ClassicFSM.ClassicFSM('SuitInterior', [State.State('entrance', self.enterEntrance, self.exitEntrance, ['walk']),
+         State.State('Elevator', self.enterElevator, self.exitElevator, ['walk']),
          State.State('battle', self.enterBattle, self.exitBattle, ['walk', 'died']),
          State.State('walk', self.enterWalk, self.exitWalk, ['stickerBook',
           'stopped',
@@ -67,8 +66,6 @@ class SuitInterior(Place.Place):
     def load(self):
         Place.Place.load(self)
         self.parentFSM.getStateNamed('suitInterior').addChild(self.fsm)
-        self.townBattle = TownBattle.TownBattle('town-battle-done')
-        self.townBattle.load()
         for i in range(1, 3):
             Suit.loadSuits(i)
 
@@ -80,9 +77,6 @@ class SuitInterior(Place.Place):
         self.ignoreAll()
         ModelPool.garbageCollect()
         TexturePool.garbageCollect()
-        self.townBattle.unload()
-        self.townBattle.cleanup()
-        del self.townBattle
         for i in range(1, 3):
             Suit.unloadSuits(i)
 
@@ -149,14 +143,15 @@ class SuitInterior(Place.Place):
             self.notify.error('Unknown mode: ' + +' in handleElevatorDone')
 
     def enterBattle(self, event):
-        mult = ToontownBattleGlobals.getInteriorCreditMultiplier(self.numFloors)
-        self.townBattle.enter(event, self.fsm.getStateNamed('battle'), bldg=1, creditMultiplier=mult)
+        # Combat is real-time now: the interior place never hands control to
+        # the legacy TownBattle HUD.  The DistributedSuitInterior forces this
+        # place back to 'walk' for action floors; this state only remains as
+        # a defensive fallback so an unexpected state request cannot crash.
         self.enterFLM()
         base.localAvatar.b_setAnimState('off', 1)
         base.localAvatar.cantLeaveGame = 1
 
     def exitBattle(self):
-        self.townBattle.exit()
         base.localAvatar.cantLeaveGame = 0
 
     def enterWalk(self, teleportIn = 0):

@@ -188,6 +188,13 @@ class CogCombatControllerAI:
     # PATROL
     # ------------------------------------------------------------------
     def _tickPatrol(self, now, profile):
+        # Building-room Cogs are planted by the interior planner and have no
+        # street DNA path (``legType`` is SuitLeg.TOff).  They must never
+        # self-acquire through the patrol loop: the room director aggro()s
+        # them when the elevator doors open, otherwise a stationary Cog would
+        # aggro anything that wanders past after its floor was cleared.
+        if self.suit.legType != SuitLeg.TWalk:
+            return
         pos = self.suit.getCurrentPathPos()
         if pos is None:
             return

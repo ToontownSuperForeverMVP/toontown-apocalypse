@@ -4,7 +4,12 @@ The regular street director owns roaming population and extraction pressure.
 This director deliberately owns only one interior floor: all Cogs are created
 by the existing building planner, registered here together, and immediately
 aggro the Toons in the room.  That lets the building keep its established
-elevator/zone protocol without falling back to the turn-based battle FSM.
+elevator/zone protocol while the fight itself runs on the same movement,
+telegraph, and gag rules as a street.
+
+Difficulty scales with building depth: each floor raises the effective tier
+so a five-storey building climaxes on the top-floor office, independent of
+the tier the Toons used outside.
 """
 
 from panda3d.core import Point3
@@ -18,6 +23,15 @@ from toontown.action.director.StreetDirectorAI import StreetDirectorAI
 class BuildingActionDirectorAI(StreetDirectorAI):
     notify = DirectNotifyGlobal.directNotify.newCategory('BuildingActionDirectorAI')
 
+    # Effective tier added per floor above the ground level.
+    TIER_PER_FLOOR = 1.5
+    # Flat bean bonus granted to every living Toon when a floor is cleared.
+    FLOOR_CLEAR_BEANS_BASE = 25
+    FLOOR_CLEAR_BEANS_PER_FLOOR = 12
+    # Bonus for reaching and clearing the top-floor office.
+    TOP_FLOOR_BONUS_BASE = 60
+    TOP_FLOOR_BONUS_PER_FLOOR = 30
+
     def __init__(self, interior, endpoint):
         # Reuse the authoritative gag validation, reward, trap, and Cog
         # controller integration.  ``endpoint`` is the street planner object;
@@ -28,15 +42,19 @@ class BuildingActionDirectorAI(StreetDirectorAI):
         self.floor = 0
         self.floorCallback = None
         self.floorFinished = False
+        self.floorKills = 0
+        self.floorStartTime = 0.0
         self.taskName = 'actionBuilding-%s' % id(self)
 
     def startFloor(self, floor, toonIds, suits, callback):
         self.floor = floor
         self.floorCallback = callback
         self.floorFinished = False
+        self.floorKills = 0
         self.activeToons = {}
         self.safeToons = set()
         now = globalClock.getFrameTime()
+        self.floorStartTime = now
         powers = []
         for toonId in toonIds:
             toon = self.air.doId2do.get(toonId)
@@ -44,7 +62,12 @@ class BuildingActionDirectorAI(StreetDirectorAI):
                 self.activeToons[toonId] = now
                 powers.append(ActionProgression.getPowerRating(toon))
         power = sum(powers) / len(powers) if powers else ActionGlobals.MIN_POWER
-        self.profile = ActionGlobals.getDifficultyProfile(ActionGlobals.DEFAULT_TIER, power, 0)
+        # Difficulty climbs with building depth so a top-floor office fights
+        # like a much tougher street than the lobby of the same building.
+        effectiveTier = ActionGlobals.DEFAULT_TIER + self.TIER_PER_FLOOR * max(0, floor)
+        self.tier = max(ActionGlobals.MIN_TIER,
+                        min(ActionGlobals.MAX_TIER, int(round(effectiveTier))))
+        self.profile = ActionGlobals.getDifficultyProfile(self.tier, power, 0)
         self.runActive = bool(self.activeToons)
         self.lastTickTime = now
         for index, suit in enumerate(suits):
@@ -87,23 +110,46 @@ class BuildingActionDirectorAI(StreetDirectorAI):
 
     def onCogDefeated(self, suit, toon, gagDef):
         StreetDirectorAI.onCogDefeated(self, suit, toon, gagDef)
+        self.floorKills += 1
         if self.controllers and not any(controller.isActive() for controller in self.controllers.values()):
             self._finishFloor()
+
+    def _checkBreakthrough(self):
+        # Building floors pay their own per-floor bonuses.  The street
+        # breakthrough valve must not fire from indoors: it would drain the
+        # street's pressure meter for kills made inside and spam its banner.
+        return
+
+    def _maybeSpawnCache(self, initial=False):
+        # Gag caches spawn on street geometry; one planted on the street
+        # while everyone fights inside would sit there unreachable.
+        return
+
+    def _getFloorClearBeans(self, floor):
+        return self.FLOOR_CLEAR_BEANS_BASE + self.FLOOR_CLEAR_BEANS_PER_FLOOR * floor
 
     def _finishFloor(self):
         if self.floorFinished:
             return
         self.floorFinished = True
         self.runActive = False
-        if self.floor == self.interior.topFloor:
-            bonus = 50 + 25 * (self.interior.topFloor + 1)
-            for avId in list(self.activeToons):
-                toon = self.air.doId2do.get(avId)
-                if toon is not None:
-                    self._grantBeans(toon, bonus)
-            if self.endpoint is not None:
+        topFloor = self.floor == self.interior.topFloor
+        if topFloor:
+            bonus = self.TOP_FLOOR_BONUS_BASE + self.TOP_FLOOR_BONUS_PER_FLOOR * (self.interior.topFloor + 1)
+        else:
+            bonus = self._getFloorClearBeans(self.floor)
+        for avId in list(self.activeToons):
+            toon = self.air.doId2do.get(avId)
+            if toon is not None:
+                self._grantBeans(toon, bonus)
+        if self.endpoint is not None:
+            value = min(65535, bonus)
+            if topFloor:
                 self.endpoint.sendUpdate('actionAnnounce',
-                                         [ActionGlobals.ANNOUNCE_BREAKTHROUGH, 0, bonus])
+                                         [ActionGlobals.ANNOUNCE_BREAKTHROUGH, 0, value])
+            else:
+                self.endpoint.sendUpdate('actionAnnounce',
+                                         [ActionGlobals.ANNOUNCE_BUILDING_FLOOR_CLEARED, 0, value])
         if self.floorCallback is not None:
             self.floorCallback()
 

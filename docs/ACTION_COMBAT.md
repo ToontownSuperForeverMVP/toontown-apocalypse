@@ -37,6 +37,8 @@ toontown/action/
     PressureDirector.py       the rolling Cog Pressure meter (pure logic, unit tested)
     StreetDirectorAI.py       one per street planner: run state, tier, pressure, spawning, rewards, objectives,
                               traps, toon-ups, caches, engage slots
+    BuildingActionDirectorAI.py one per cog building floor: seeds and aggro()s the room, scales the
+                              profile with building depth, pays floor/top-floor bonuses
   objectives/
     ObjectiveGenerator.py     procedural contracts (kill N of dept, defeat elites, survive stage, ...)
   ui/
@@ -224,6 +226,39 @@ rewards are awarded by the server before the report is shown.
 end-screen modes, validates the report lifecycle, and writes
 `screenshots/action-game-over-preview.png`.
 
+## Cog buildings (real-time interiors)
+
+Every cog building is an action building: boarding the elevator keeps the
+street run alive, the interior is one real-time room per floor, and the
+classic turn-based battle interior is gone.
+
+* **Getting in** — `Street.detectedElevatorCollision` marks the run
+  `buildingActive`, the classic elevator/zone protocol hands the Toon to the
+  interior place, and `Street.exit` preserves the whole run (HUD, tier, kill
+  counters, rolling AI handoff) for the transfer.
+* **Rooms, not battle rounds** — `DistributedSuitInteriorAI` spawns every Cog
+  of the floor at once (no reserve queue), paces floors on the clients
+  (`elevatorDone` with a 20 s watchdog), and keeps a 2.5 s breather between a
+  cleared floor and the next elevator. A Toon that goes sad is dropped from
+  the session; the building closes when the last one leaves.
+* **The room director** — `BuildingActionDirectorAI` (one per floor) seeds the
+  planted Cogs at the client's room positions, `aggro()`s them the moment the
+  doors open, and ticks the same controllers as a street. Planted Cogs have
+  no DNA path (`SuitLeg.TOff`) and never self-acquire through patrol.
+* **Depth scaling** — each floor adds +1.5 effective tier on top of the
+  street profile, so a five-storey building climaxes on the top-floor office
+  regardless of the tier chosen outside.
+* **Rewards** — per-Cog street rewards apply as normal, plus a floor-clear
+  bean bonus for everyone still alive and a bigger payout for clearing the
+  top floor (`ANNOUNCE_BUILDING_FLOOR_CLEARED` / `ANNOUNCE_BUILDING_EXTRACTED`
+  banners on the HUD).
+* **Getting out** — clearing the top floor spawns the interior elevator;
+  riding it triggers the takeover ceremony (`DistributedBuildingAI.
+  actionBuildingReturn`) and drops the Toon back on the street with the run
+  intact and the end report reading `BUILDING EXTRACTED`. Going sad inside a
+  building routes through the interior's classic `died` flow and the
+  game-over report.
+
 ## Developer magic words
 
 | Word | Effect |
@@ -242,7 +277,7 @@ end-screen modes, validates the report lifecycle, and writes
 ```text
 ./Panda3D/python/ppython.exe tools/action_selftest.py   # logic modules + dc parse
 ./Panda3D/python/ppython.exe tools/action_dc_check.py   # dc field arity vs. handlers / sendUpdate literals
-./Panda3D/python/ppython.exe tools/action_fulltest.py   # every street + tutorial feature (6800+ checks)
+./Panda3D/python/ppython.exe tools/action_fulltest.py   # every street, building + tutorial feature (8700+ checks)
 ```
 
 All three run without booting a client or an AI. Add new dc fields to
@@ -253,7 +288,6 @@ driven deterministically.
 
 ## Not in this pass (next steps)
 
-* Cog Buildings as escalating roguelite towers (elevator = risk/reward room).
 * A Toon-flavoured style/rank meter multiplying mastery XP.
 * Extra mobility (slide, dash, air control) beyond the existing sprint/crouch.
 * Playtest-driven tuning of every constant in `ActionGlobals.py`.

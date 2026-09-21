@@ -11,20 +11,27 @@ from toontown.toonbase import TTLocalizer, ToontownGlobals
 class RunEndPanel(DirectObject):
     """A self-contained overlay so place teardown cannot eat the run report."""
 
-    def __init__(self, streetName, summary, escaped, doneCallback=None):
+    def __init__(self, streetName, summary, escaped, doneCallback=None, extracted=False):
         DirectObject.__init__(self)
         self.doneCallback = doneCallback
         self.finished = False
         self.signFont = ToontownGlobals.getSignFont()
         self.uiFont = ToontownGlobals.getInterfaceFont()
-        self._build(streetName, summary, escaped)
+        self._build(streetName, summary, escaped, extracted)
         self.accept('escape', self.close)
         self.accept('enter', self.close)
 
-    def _build(self, streetName, summary, escaped):
+    def _build(self, streetName, summary, escaped, extracted=False):
         color = Vec4(0.4, 0.95, 0.65, 1) if escaped else Vec4(1.0, 0.38, 0.32, 1)
-        title = TTLocalizer.ActionEndEscapedTitle if escaped else TTLocalizer.ActionEndGameOverTitle
-        subtitle = TTLocalizer.ActionEndEscapedSub if escaped else TTLocalizer.ActionEndGameOverSub
+        if extracted:
+            title = TTLocalizer.ActionEndExtractedTitle
+            subtitle = TTLocalizer.ActionEndExtractedSub
+        elif escaped:
+            title = TTLocalizer.ActionEndEscapedTitle
+            subtitle = TTLocalizer.ActionEndEscapedSub
+        else:
+            title = TTLocalizer.ActionEndGameOverTitle
+            subtitle = TTLocalizer.ActionEndGameOverSub
         self.backdrop = DirectFrame(parent=aspect2d, relief=DGG.FLAT, frameSize=(-2, 2, -1.2, 1.2),
                                     frameColor=(0.015, 0.02, 0.05, 0.92))
         self.backdrop.setBin('gui-popup', 125)

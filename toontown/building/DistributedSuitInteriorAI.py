@@ -12,13 +12,23 @@ from direct.task import Timer
 from . import DistributedElevatorIntAI
 import copy
 
+from direct.task import Task
+
 from ..toon.DistributedToonAI import DistributedToonAI
 from ..hood import ZoneUtil
 from ..toon.ToonDNA import ToonDNA
+from toontown.action import ActionGlobals
 from toontown.action.director.BuildingActionDirectorAI import BuildingActionDirectorAI
 
 
 class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
+
+    # Real-time pacing: rooms are client-paced with a generous watchdog that
+    # covers a client that stalls or lies (slow loader, dropped packets).
+    ACTION_ELEVATOR_WATCHDOG = 20.0
+    # A cleared floor keeps its doors open this long before the next room's
+    # elevator actually closes and starts the next encounter.
+    ACTION_FLOOR_REST_TIME = 2.5
 
     def __init__(self, air, elevator):
         self.air = air
@@ -41,6 +51,7 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
         self.topFloor = self.numFloors - 1
         self.bldg = elevator.bldg
         self.elevator = elevator
+        self.actionExtracted = False
         self.suits = []
         self.activeSuits = []
         self.reserveSuits = []
@@ -96,6 +107,7 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
                     endpoint.unregisterActionBuildingDirector(toonId, self)
         taskName = self.taskName('deleteInterior')
         taskMgr.remove(taskName)
+        taskMgr.remove(self.taskName('actionFloorRest'))
         DistributedObjectAI.DistributedObjectAI.delete(self)
 
     def __handleUnexpectedExit(self, toonId):
@@ -118,6 +130,9 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
         self.accept(event, self.__handleUnexpectedExit, extraArgs=[toonId])
         self.toons.append(toonId)
         self.responses[toonId] = 0
+        toon = self.air.doId2do.get(toonId)
+        if toon is not None:
+            self.accept(toon.getGoneSadMessage(), self.__handleToonGoneSad, extraArgs=[toonId])
 
     def __removeToon(self, toonId):
         if self.toons.count(toonId):
@@ -126,6 +141,9 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
             self.toonIds[self.toonIds.index(toonId)] = None
         if toonId in self.responses:
             del self.responses[toonId]
+        toon = self.air.doId2do.get(toonId)
+        if toon is not None:
+            self.ignore(toon.getGoneSadMessage())
         event = self.air.getAvatarExitEvent(toonId)
         if self.avatarExitEvents.count(event):
             self.avatarExitEvents.remove(event)
@@ -290,7 +308,13 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
         self.d_setSuits()
         self.__resetResponses()
         self.d_setState('Elevator')
-        self.timer.startCallback(BattleBase.ELEVATOR_T + ElevatorData[ELEVATOR_NORMAL]['openTime'] + BattleBase.SERVER_BUFFER_TIME, self.__serverElevatorDone)
+        if self.actionBuilding:
+            # Real-time rooms are client-paced: the AI transitions when every
+            # client reports the room ready (elevatorDone) or on a generous
+            # watchdog that covers a client that stalls or lies.
+            self.timer.startCallback(self.ACTION_ELEVATOR_WATCHDOG, self.__serverElevatorDone)
+        else:
+            self.timer.startCallback(BattleBase.ELEVATOR_T + ElevatorData[ELEVATOR_NORMAL]['openTime'] + BattleBase.SERVER_BUFFER_TIME, self.__serverElevatorDone)
         return None
 
     def __serverElevatorDone(self):
@@ -356,6 +380,23 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
         self.battle = None
         return
 
+    def __handleToonGoneSad(self, toonId):
+        """A Toon that sads in an action building just leaves the run.
+
+        The classic turn-based interior let the battle object fight on and
+        revive/extract stragglers; there is no battle object here, so keep
+        the session consistent: drop the Toon from every roster and close the
+        building when nobody is left inside.
+        """
+        self.__removeToon(toonId)
+        director = self.actionDirector
+        if director is not None:
+            director.activeToons.pop(toonId, None)
+            director.safeToons.discard(toonId)
+        self.d_setToons()
+        if not self.toons:
+            self.bldg.deleteSuitInterior()
+
     def __handleRoundDone(self, toonIds, totalHp, deadSuits):
         totalMaxHp = 0
         for suit in self.suits:
@@ -416,13 +457,21 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
         self.d_setState('Battle')
 
     def __actionFloorCleared(self):
-        # Cogs in a room are one encounter.  Once the last one dies, release
-        # the floor and let the established elevator FSM open the next room.
+        # Cogs in a room are one encounter.  Once the last one dies, keep the
+        # floor open for a breather before the next room's elevator closes;
+        # clients spend that window looting and crossing to the next room.
         self.__cleanupFloorBattle()
         if self.currentFloor == self.topFloor:
             self.fsm.request('Reward')
         else:
-            self.b_setState('Resting')
+            taskMgr.doMethodLater(self.ACTION_FLOOR_REST_TIME, self.__restDone,
+                                  self.taskName('actionFloorRest'))
+
+    def __restDone(self, task):
+        if not hasattr(self, 'fsm') or self.fsm.getCurrentState().getName() != 'Battle':
+            return Task.done
+        self.b_setState('Resting')
+        return Task.done
 
     def exitBattle(self):
         return None
@@ -485,6 +534,13 @@ class DistributedSuitInteriorAI(DistributedObjectAI.DistributedObjectAI):
             # The final floor has its own physical elevator.  Keep the
             # interior alive until its doors close, then expose the normal
             # exterior elevator/zone transition to the client.
+            self.actionExtracted = True
+            if self.actionDirector is None:
+                director = None
+                endpoint = getattr(self.bldg, 'suitPlannerExt', None)
+                if endpoint is not None:
+                    endpoint.sendUpdate('actionAnnounce',
+                                        [ActionGlobals.ANNOUNCE_BUILDING_EXTRACTED, 0, 0])
             self.bldg.actionBuildingReturn(self.toons)
             self.sendUpdate('actionBuildingReturn', [])
             return

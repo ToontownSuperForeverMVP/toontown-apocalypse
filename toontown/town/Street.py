@@ -170,7 +170,10 @@ class Street(BattlePlace.BattlePlace):
     def exit(self, visibilityFlag = 1):
         if self.streetRun is not None:
             if self._isActionBuildingTransferExit():
-                self.streetRun.exit()
+                # Boarding a cog building keeps the whole run alive: the same
+                # HUD, tier, kill counters and rolling AI handoff continue
+                # when the Toon walks back out (or extracts from the roof).
+                self.streetRun.preserveForStreetTransition()
                 self.streetRun.street = None
             elif self._isStreetConnectorExit():
                 self.streetRun.preserveForStreetTransition()
@@ -253,6 +256,11 @@ class Street(BattlePlace.BattlePlace):
             self.streetRun.closeTierSelect()
 
     def enterElevatorIn(self, requestStatus):
+        # This how only arrives from a building interior's reward trip.  A
+        # preserved run coming back to its street just extracted, so its end
+        # report reads as a success instead of an escape.
+        if self.streetRun is not None and self.streetRun.runStarted:
+            self.streetRun.markExtracted()
         self._eiwbTask = taskMgr.add(Functor(self._elevInWaitBldgTask, requestStatus['bldgDoId']), uniqueName('elevInWaitBldg'))
 
     def _elevInWaitBldgTask(self, bldgDoId, task):
@@ -330,7 +338,7 @@ class Street(BattlePlace.BattlePlace):
     def _isActionBuildingTransferExit(self):
         status = getattr(self, 'doneStatus', None)
         return bool(self.streetRun is not None and self.streetRun.buildingActive
-                    and status and status.get('where') in ('suitInterior', 'cogdoInterior'))
+                    and status and status.get('where') == 'suitInterior')
 
     def enterTeleportIn(self, requestStatus):
         teleportDebug(requestStatus, 'Street.enterTeleportIn(%s)' % (requestStatus,))

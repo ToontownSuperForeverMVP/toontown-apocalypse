@@ -61,6 +61,11 @@ class ActionHUD(DirectObject):
         DirectObject.__init__(self)
         self.streetName = streetName
         self.tier = ActionGlobals.DEFAULT_TIER
+        # Set while the shared run is detached from its street (shop, tunnel
+        # or building).  A RUN_STARTED announce seen during that window is
+        # the replacement street's echo of the preserved run, not a fresh
+        # start, so the rolling counters must survive it.
+        self.runPreserved = False
         self.kills = 0
         self.runStartedAt = globalClock.getFrameTime()
         self.startMoney = getattr(getattr(base, 'localAvatar', None), 'getMoney', lambda: 0)()
@@ -337,6 +342,9 @@ class ActionHUD(DirectObject):
             self.audio.play('complete')
             self.showBanner('STREET BREAKTHROUGH', TTLocalizer.ActionBreakthrough % value, Vec4(0.55, 0.95, 1.0, 1))
         elif kind == ActionGlobals.ANNOUNCE_RUN_STARTED:
+            if self.runPreserved:
+                self.runPreserved = False
+                return
             self.chainUntil = 0.0
             self.runStartedAt = globalClock.getFrameTime()
             self.startMoney = getattr(getattr(base, 'localAvatar', None), 'getMoney', lambda: 0)()
@@ -345,6 +353,14 @@ class ActionHUD(DirectObject):
             self.killText.setText(TTLocalizer.ActionHudKills % self.kills)
             self.showBanner(TTLocalizer.ActionRunStarted % value, TTLocalizer.ActionTierHintBanner,
                             Vec4(1, 0.9, 0.4, 1))
+        elif kind == ActionGlobals.ANNOUNCE_BUILDING_FLOOR_CLEARED:
+            self.audio.play('complete')
+            self.showBanner(TTLocalizer.ActionBuildingFloorCleared % value,
+                            TTLocalizer.ActionBuildingNextFloorHint, Vec4(0.6, 1.0, 0.6, 1))
+        elif kind == ActionGlobals.ANNOUNCE_BUILDING_EXTRACTED:
+            self.audio.play('complete')
+            self.showBanner(TTLocalizer.ActionBuildingExtractedTitle,
+                            TTLocalizer.ActionBuildingExtracted % value, Vec4(0.55, 0.95, 1.0, 1))
         elif kind == ActionGlobals.ANNOUNCE_CONTRACT_CLEARED:
             self.showBanner(TTLocalizer.ActionContractClearedTitle, TTLocalizer.ActionContractCleared % value,
                             Vec4(0.6, 1.0, 0.6, 1))

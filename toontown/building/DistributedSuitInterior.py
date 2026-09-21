@@ -234,9 +234,12 @@ class DistributedSuitInterior(DistributedObject.DistributedObject):
         if self.actionBuilding and state in ('Battle', 'Resting', 'Reward'):
             # The classic interior state machine used to hand control to
             # TownBattle here.  Action floors stay in the room so movement,
-            # aiming, and the elevator trigger remain live.
+            # aiming, and the elevator trigger remain live.  Only the
+            # interior place itself is touched: a late update after a death
+            # transition must not stomp whatever place is current by then.
             place = base.cr.playGame.getPlace()
-            if place is not None and place.fsm.getCurrentState().getName() != 'walk':
+            if place is not None and type(place).__name__ == 'SuitInterior' \
+                    and place.fsm.getCurrentState().getName() != 'walk':
                 place.setState('walk')
 
     def d_elevatorDone(self):
@@ -323,6 +326,9 @@ class DistributedSuitInterior(DistributedObject.DistributedObject):
         """Load a room and open its doors without riding/camera tracks."""
         if self.floorModel:
             self.floorModel.removeNode()
+        self.battleMusic = f'suit-building-{(self.currentFloor + 1)}'
+        if self.currentFloor == self.numFloors - 1:
+            self.battleMusic = 'suit-building-boss'
         if self.currentFloor == 0:
             self.floorModel = loader.loadModel('phase_7/models/modules/suit_interior')
             positions, headings = self.BottomFloor_SuitPositions, self.BottomFloor_SuitHs
@@ -357,6 +363,11 @@ class DistributedSuitInterior(DistributedObject.DistributedObject):
         track = Sequence(
             ElevatorUtils.getOpenInterval(self, self.leftDoorIn, self.rightDoorIn,
                                           self.openSfx, None, type=ELEVATOR_NORMAL),
+            # The room's model is replaced on the next floor; detach everyone
+            # from the elevator module before combat starts or they would be
+            # destroyed with it.
+            Func(camera.wrtReparentTo, render),
+            *[Func(toon.wrtReparentTo, render) for toon in self.toons],
             Func(callback), name=name)
         track.start(ts)
         self.activeIntervals[name] = track
@@ -435,6 +446,9 @@ class DistributedSuitInterior(DistributedObject.DistributedObject):
     def enterResting(self, ts = 0):
         base.contentPackMusicManager.playMusic(self.waitMusic, looping=1, volume=0.7, interrupt=True)
         self.__closeInElevator()
+        # Light the next floor on the outbound elevator panel so the progress
+        # readout survives the new no-ride room transitions.
+        self.setElevatorLights(self.elevatorModelOut)
 
     def exitResting(self):
         pass

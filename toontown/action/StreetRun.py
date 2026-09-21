@@ -53,7 +53,20 @@ class StreetRun(DirectObject):
         self.plannerWaitTask = None
         self.entered = False
         self.endMode = None
+        # Set while the Toon is inside a real-time cog building; cleared when
+        # they step back onto a street (or the boarding is rejected).
         self.buildingActive = False
+        # True while this run is detached from its street (shop, tunnel or
+        # building).  A resumed run must not treat a RUN_STARTED announce as
+        # a fresh start and wipe the rolling kill counters.
+        self.runPreserved = False
+        # True once the Toon cleared a building's top floor this run; the end
+        # report then reads as a successful extraction instead of an escape.
+        self.extracted = False
+        # Hood captured when the run detaches into a building interior; the
+        # death hook needs it because the Street object is already torn down
+        # by the time the Toon can go sad inside.
+        self._buildingHoodId = None
         self.streetTransitionPending = False
         self.pendingEndPanel = None
         self.endPanelWaitTask = None
@@ -87,6 +100,7 @@ class StreetRun(DirectObject):
         self.hud = ActionHUD(self.streetName)
         self.accept(base.localAvatar.uniqueName('died'), self.__handleLocalToonDied)
         self.accept('action-planner-ready', self.__handlePlannerReady)
+        self.accept('action-run-extracted', self.markExtracted)
         planner = self.getPlanner()
         if planner is not None:
             self.__primeHudFromPlanner(planner)
@@ -130,12 +144,21 @@ class StreetRun(DirectObject):
             return
         self.entered = False
         self.streetTransitionPending = True
+        self.runPreserved = True
+        if self.hud is not None:
+            self.hud.runPreserved = True
         self.ignoreAll()
         self._stopPlannerWait()
         self.closeTierSelect()
         self.closeLoadout()
         # Keep the HUD, tier, and runStarted flag alive.  The destination
         # street reattaches this same object after its planner generates.
+        if self.buildingActive:
+            # The interior place FSM owns deaths while the run is detached
+            # into a building; without this hook going sad inside would leave
+            # a sad Toon stranded in the room.
+            self._buildingHoodId = self.street.loader.hood.id if self.street is not None else None
+            self.accept(base.localAvatar.uniqueName('died'), self.__handleBuildingToonDied)
 
     def destroy(self, deferEndPanel=False):
         # A preserved building/connector run is intentionally detached from
@@ -174,13 +197,20 @@ class StreetRun(DirectObject):
         if existing is not None:
             existing.destroy()
         self.endMode = 'escaped'
-        base.actionRunEndPanel = RunEndPanel(streetName, summary, True)
+        base.actionRunEndPanel = RunEndPanel(streetName, summary, True,
+                                             extracted=self.extracted)
 
     def beginBuilding(self):
         self.buildingActive = True
+        self.extracted = False
 
     def cancelBuilding(self):
         self.buildingActive = False
+        self.extracted = False
+
+    def markExtracted(self):
+        """The local Toon cleared a building's top floor this run."""
+        self.extracted = True
 
     def returnToStreet(self, street):
         continueRun = self.streetTransitionPending or self.buildingActive
@@ -191,12 +221,17 @@ class StreetRun(DirectObject):
         self.buildingActive = False
         self.streetTransitionPending = False
         self.entered = True
+        self._buildingHoodId = None
+        # Drop the interior death hook before re-registering the street one;
+        # messenger accepts with different callbacks would otherwise stack.
+        self.ignore(base.localAvatar.uniqueName('died'))
         self.accept(base.localAvatar.uniqueName('died'), self.__handleLocalToonDied)
         self.accept('action-planner-ready', self.__handlePlannerReady)
-        planner = self.getPlanner()
+        self.accept('action-run-extracted', self.markExtracted)
         if continueRun:
             # A new street has a new distributed planner.  Re-register the
             # preserved run there without reopening tier selection.
+            planner = self.getPlanner()
             if planner is not None:
                 self.__sendRunRequest(planner)
             else:
@@ -238,6 +273,10 @@ class StreetRun(DirectObject):
             street.fsm.request('walk')
 
     def startRun(self, tier=None):
+        if self.runStarted:
+            # Already registered with a planner (preserved resume, or a
+            # double prompt); a second request would reset the rolling run.
+            return
         if tier is not None:
             self.tier = max(ActionGlobals.MIN_TIER, min(ActionGlobals.MAX_TIER, int(tier)))
         self.rememberedTiers[self.branchZone] = self.tier
@@ -315,6 +354,27 @@ class StreetRun(DirectObject):
             return
         if self.endMode is not None:
             return
+        if self.buildingActive:
+            # Inside a building the interior place FSM owns the death; drive
+            # its classic 'died' flow back to the playground and still show
+            # the run report over it.
+            place = base.cr.playGame.getPlace()
+            if place is None or not hasattr(place, 'fsm') or place is street:
+                return
+            hoodId = street.loader.hood.id
+            requestStatus = {'loader': ZoneUtil.getLoaderName(hoodId),
+                             'where': ZoneUtil.getWhereName(hoodId, 1),
+                             'how': 'teleportIn',
+                             'hoodId': hoodId,
+                             'zoneId': hoodId,
+                             'shardId': None,
+                             'avId': -1}
+            self.endMode = 'gameover'
+            place.fsm.request('died', [requestStatus])
+            self.closeTierSelect()
+            self.closeLoadout()
+            self._showEndPanel(escaped=False)
+            return
         self.endMode = 'gameover'
         hoodId = street.loader.hood.id
         requestStatus = {'loader': ZoneUtil.getLoaderName(hoodId),
@@ -328,6 +388,29 @@ class StreetRun(DirectObject):
         self.closeLoadout()
         self._showEndPanel(escaped=False,
                            doneCallback=lambda: self.__continueDeath(requestStatus))
+
+    def __handleBuildingToonDied(self):
+        """Death while detached inside a cog building interior."""
+        if self.endMode is not None:
+            return
+        hoodId = self._buildingHoodId
+        if hoodId is None:
+            return
+        place = base.cr.playGame.getPlace()
+        if place is None or not hasattr(place, 'fsm'):
+            return
+        self.endMode = 'gameover'
+        requestStatus = {'loader': ZoneUtil.getLoaderName(hoodId),
+                         'where': ZoneUtil.getWhereName(hoodId, 1),
+                         'how': 'teleportIn',
+                         'hoodId': hoodId,
+                         'zoneId': hoodId,
+                         'shardId': None,
+                         'avId': -1}
+        place.fsm.request('died', [requestStatus])
+        self.closeTierSelect()
+        self.closeLoadout()
+        self._showEndPanel(escaped=False)
 
     def __continueDeath(self, requestStatus):
         street = self.street
