@@ -227,6 +227,12 @@ def getWakeInfo(hoodId = None, zoneId = None):
             hoodId = base.cr.playGame.getPlaceId()
         if zoneId is None:
             zoneId = base.cr.playGame.getPlace().getZoneId()
+        # Recovery commands and place transitions can briefly leave the
+        # current place without a zone.  A missing zone simply means there is
+        # no water wake to configure; it must not reach the integer range
+        # checks in getCanonicalZoneId().
+        if zoneId is None:
+            return (showWake, wakeWaterHeight)
         canonicalZoneId = getCanonicalZoneId(zoneId)
         if canonicalZoneId == DonaldsDock:
             wakeWaterHeight = DDWakeWaterHeight
